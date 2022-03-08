@@ -25,12 +25,11 @@ pub fn main() !void {
         .{ 500, 700 },
         .{ 200, 700 },
     });
-    var poly_b_verts = [_]Vec2{
+    var poly_b = Polygon.init(&[_]Vec2{
         .{ 200, 100 },
         .{ 300, 100 },
         .{ 250, 190 },
-    };
-    const poly_b = Polygon.init(&poly_b_verts);
+    });
 
     while (!win.shouldClose()) {
         const size = try win.getSize();
@@ -86,11 +85,9 @@ pub fn main() !void {
                 if (sqmag > q.distance * q.distance) {
                     move *= @splat(2, q.distance / @sqrt(sqmag));
                 }
-                remaining -= move;
 
-                for (poly_b_verts) |*v| {
-                    v.* += move;
-                }
+                poly_b.offset += move;
+                remaining -= move;
             }
         }
 
@@ -103,11 +100,13 @@ pub fn main() !void {
 
 fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
     ctx.beginPath();
+    const v0 = poly.verts[0] + poly.offset;
     ctx.moveTo(
-        @floatCast(f32, poly.verts[0][0]),
-        @floatCast(f32, poly.verts[0][1]),
+        @floatCast(f32, v0[0]),
+        @floatCast(f32, v0[1]),
     );
-    for (poly.verts[1..]) |v| {
+    for (poly.verts[1..]) |raw_vert| {
+        const v = raw_vert + poly.offset;
         ctx.lineTo(
             @floatCast(f32, v[0]),
             @floatCast(f32, v[1]),

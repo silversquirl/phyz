@@ -5,6 +5,7 @@
 const std = @import("std");
 const Vec2 = std.meta.Vector(2, f64);
 
+offset: Vec2 = Vec2{ 0, 0 },
 verts: []const Vec2,
 
 const Polygon = @This();
@@ -30,7 +31,8 @@ pub fn queryPoint(self: Polygon, point: Vec2) QueryResult {
     };
 
     // FIXME: O(n)
-    for (self.verts) |v| {
+    for (self.verts) |raw_vert| {
+        const v = raw_vert + self.offset;
         const normal = point - v;
         const sqdist = @reduce(.Add, normal * normal);
         if (sqdist < r.distance) {
@@ -44,8 +46,9 @@ pub fn queryPoint(self: Polygon, point: Vec2) QueryResult {
     r.normal /= @splat(2, r.distance);
 
     // FIXME: O(n)
-    var a = self.verts[self.verts.len - 1];
-    for (self.verts) |b| {
+    var a = self.verts[self.verts.len - 1] + self.offset;
+    for (self.verts) |raw_b| {
+        const b = raw_b + self.offset;
         defer a = b;
 
         const ab = b - a;
@@ -109,11 +112,14 @@ pub const QueryResult = struct {
 fn queryEdges(self: Polygon, other: Polygon) SingleQueryResult {
     var result = SingleQueryResult{};
     // FIXME: O(n^2)
-    var a = other.verts[other.verts.len - 1];
-    for (other.verts) |b| {
+    var a = other.verts[other.verts.len - 1] + other.offset;
+    for (other.verts) |raw_b| {
+        const b = raw_b + other.offset;
         const ab = b - a;
         const normal = normalize(.{ -ab[1], ab[0] });
-        for (self.verts) |v| {
+        for (self.verts) |raw_vert| {
+            const v = raw_vert + self.offset;
+
             // Check distance
             const dist = @reduce(.Add, (v - a) * normal);
             if (@fabs(dist) >= result.distance) continue;
@@ -138,8 +144,11 @@ fn queryEdges(self: Polygon, other: Polygon) SingleQueryResult {
 fn queryVerts(self: Polygon, other: Polygon) SingleQueryResult {
     var result = SingleQueryResult{};
     // FIXME: O(n^2)
-    for (other.verts) |ov| {
-        for (self.verts) |sv| {
+    for (other.verts) |raw_ov| {
+        const ov = raw_ov + other.offset;
+        for (self.verts) |raw_sv| {
+            const sv = raw_sv + self.offset;
+
             // Check distance
             const normal = ov - sv;
             const sqdist = @reduce(.Add, normal * normal);
