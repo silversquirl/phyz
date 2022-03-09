@@ -4,9 +4,14 @@ const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
 const Polygon = @import("Polygon.zig");
+const World = @import("World.zig");
 const Vec2 = std.meta.Vector(2, f64);
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     try glfw.init(.{});
     defer glfw.terminate();
 
@@ -19,17 +24,41 @@ pub fn main() !void {
 
     gl.clearColor(0, 0, 0, 1);
 
-    const poly_a = Polygon.init(&[_]Vec2{
-        .{ 100, 500 },
-        .{ 400, 500 },
-        .{ 500, 700 },
-        .{ 200, 700 },
-    });
-    var poly_b = Polygon.init(&[_]Vec2{
-        .{ 200, 100 },
-        .{ 300, 100 },
-        .{ 250, 190 },
-    });
+    var world = World{
+        .allocator = allocator,
+        .gravity = .{ 0, 1000 },
+    };
+
+    const body_a = World.Body{
+        .kind = .static,
+        .shapes = try allocator.dupe(World.Shape, &.{
+            World.Shape.initPoly(&[_]Vec2{
+                .{ 100, 500 },
+                .{ 400, 500 },
+                .{ 500, 700 },
+                .{ 200, 700 },
+            }),
+            World.Shape.initPoly(&[_]Vec2{
+                .{ 1000, 800 },
+                .{ 1000, 900 },
+                .{ 400, 900 },
+                .{ 400, 800 },
+            }),
+        }),
+    };
+    try world.add(body_a);
+
+    var body_b = World.Body{
+        .shapes = try allocator.dupe(World.Shape, &.{
+            World.Shape.initPoly(&[_]Vec2{
+                .{ 200, 100 },
+                .{ 300, 100 },
+                .{ 250, 190 },
+            }),
+        }),
+    };
+    body_b.teleport(.{ 200, 0 });
+    try world.add(body_b);
 
     while (!win.shouldClose()) {
         const size = try win.getSize();
@@ -45,51 +74,26 @@ pub fn main() !void {
                 @intToFloat(f32, size.width),
         );
 
-        const mouse_i = try win.getCursorPos();
-        const mouse = Vec2{
-            mouse_i.xpos,
-            mouse_i.ypos,
-        };
+        // const mouse_i = try win.getCursorPos();
+        // const mouse = Vec2{
+        //     mouse_i.xpos,
+        //     mouse_i.ypos,
+        // };
 
-        {
-            drawPoly(ctx, poly_a, 0xffff00ff);
-            const q = poly_a.queryPoint(mouse);
-            drawQuery(ctx, q, 0xff00ffff);
+        for (body_a.shapes) |shape| {
+            drawPoly(ctx, shape.shape.poly, 0xffff00ff);
         }
-        {
-            drawPoly(ctx, poly_b, 0x00ffffff);
-            const q = poly_b.queryPoint(mouse);
-            drawQuery(ctx, q, 0x00ff00ff);
+        for (body_b.shapes) |shape| {
+            drawPoly(ctx, shape.shape.poly, 0x00ffffff);
         }
-        {
-            var q = poly_b.queryPoly(poly_a);
-            drawQuery(ctx, q, 0xff0000ff);
-        }
-
-        {
-            // Apply gravity
-            // TODO: timescale
-            const gravity = Vec2{ 0, 5 };
-            const slop = 0.1;
-            var remaining = gravity;
-            while (true) {
-                const sqmag = @reduce(.Add, remaining * remaining);
-                if (sqmag <= 0) break;
-
-                var move = remaining;
-
-                const q = poly_b.queryPoly(poly_a);
-                if (q.distance <= slop) {
-                    break;
-                }
-                if (sqmag > q.distance * q.distance) {
-                    move *= @splat(2, q.distance / @sqrt(sqmag));
-                }
-
-                poly_b.offset += move;
-                remaining -= move;
+        for (body_a.shapes) |sa| {
+            for (body_b.shapes) |sb| {
+                var q = sb.shape.poly.queryPoly(sa.shape.poly);
+                drawQuery(ctx, q, 0xff0000ff);
             }
         }
+
+        world.tick(1 / 60.0);
 
         ctx.endFrame();
 
