@@ -75,27 +75,28 @@ fn approachOrigin(s: *[]v.Vec2) void {
 
             // FIXME: this code is horrible; fix it
 
-            if (v.dot(ab, -a) < 0 and v.dot(ac, -a) < 0) { // Voronoi A
+            // Check the last vertex first, to ensure we converge even with degenerate simplices
+            if (v.dot(-ac, -c) < 0 and v.dot(-bc, -c) < 0) { // Voronoi C
+                s.*[0] = c;
                 s.len = 1;
             } else if (v.dot(-ab, -b) < 0 and v.dot(bc, -b) < 0) { // Voronoi B
                 s.*[0] = b;
                 s.len = 1;
-            } else if (v.dot(-ac, -c) < 0 and v.dot(-bc, -c) < 0) { // Voronoi C
-                s.*[0] = c;
+            } else if (v.dot(ab, -a) < 0 and v.dot(ac, -a) < 0) { // Voronoi A
                 s.len = 1;
-            } else if (v.dot(v.tripleCross(ac, ab, ab), -a) >= 0 and // Voronoi AB
-                v.dot(ab, -a) >= 0 and v.dot(-ab, -b) >= 0)
+            } else if (v.dot(v.tripleCross(ab, ac, ac), -a) >= 0 and // Voronoi CA
+                v.dot(ac, -a) >= 0 and v.dot(-ac, -c) >= 0)
             {
+                s.*[1] = c;
                 s.len = 2;
             } else if (v.dot(v.tripleCross(-ab, bc, bc), -b) >= 0 and // Voronoi BC
                 v.dot(bc, -b) >= 0 and v.dot(-bc, -c) >= 0)
             {
                 s.*[0] = c;
                 s.len = 2;
-            } else if (v.dot(v.tripleCross(ab, ac, ac), -a) >= 0 and // Voronoi AC
-                v.dot(ac, -a) >= 0 and v.dot(-ac, -c) >= 0)
+            } else if (v.dot(v.tripleCross(ac, ab, ab), -a) >= 0 and // Voronoi AB
+                v.dot(ab, -a) >= 0 and v.dot(-ab, -b) >= 0)
             {
-                s.*[1] = c;
                 s.len = 2;
             } else { // Voronoi ABC (inside the triangle)
                 s.len = 0;

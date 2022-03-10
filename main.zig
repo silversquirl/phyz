@@ -4,9 +4,12 @@ const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
 const gjk = @import("gjk.zig");
+const MinkowskiDifference = @import("minkowski.zig").MinkowskiDifference;
 const Polygon = @import("Polygon.zig");
 const World = @import("World.zig");
 const Vec2 = std.meta.Vector(2, f64);
+
+const M = MinkowskiDifference(Polygon, Polygon);
 
 pub fn main() !void {
     try glfw.init(.{});
@@ -25,6 +28,13 @@ pub fn main() !void {
         .{ 100, 380 },
         .{ 0, 110 },
         .{ 40, 0 },
+    });
+
+    var poly2 = Polygon.init(.{ 0, 0 }, &[_]Vec2{
+        .{ -50, -50 },
+        .{ 50, -50 },
+        .{ 50, 50 },
+        .{ -50, 50 },
     });
 
     gl.clearColor(0, 0, 0, 1);
@@ -48,17 +58,35 @@ pub fn main() !void {
             mouse_i.ypos,
         };
         _ = mouse;
+        poly2.offset = mouse;
 
         drawPoly(ctx, poly, 0x00ffffff);
-        var poly2 = poly;
-        poly2.offset -= mouse;
-        drawPoint(ctx, gjk.minimumPoint(poly2, Polygon.support) + mouse, 0x00ff00ff);
+        drawPoly(ctx, poly2, 0xffff00ff);
+        const m = M{ .a = poly, .b = poly2 };
+        drawMinkowski(ctx, m, 0xff00ffaa);
+        drawPoint(ctx, gjk.minimumPoint(m, M.support) + mouse, 0x00ff00ff);
 
         ctx.endFrame();
 
         try win.swapBuffers();
         try glfw.pollEvents();
     }
+}
+
+fn drawMinkowski(ctx: *nanovg.Context, m: M, color: u32) void {
+    ctx.beginPath();
+    for (m.a.verts) |av| {
+        for (m.b.verts) |bv| {
+            const v = (av + m.a.offset) - (bv + m.b.offset);
+            ctx.circle(
+                @floatCast(f32, v[0]),
+                @floatCast(f32, v[1]),
+                4,
+            );
+        }
+    }
+    ctx.fillColor(nanovg.Color.hex(color));
+    ctx.fill();
 }
 
 fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
@@ -80,6 +108,18 @@ fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
     ctx.strokeColor(c);
     ctx.stroke();
     c.a *= 0.5;
+    ctx.fillColor(c);
+    ctx.fill();
+
+    ctx.beginPath();
+    for (poly.verts) |raw_vert| {
+        const v = raw_vert + poly.offset;
+        ctx.circle(
+            @floatCast(f32, v[0]),
+            @floatCast(f32, v[1]),
+            3,
+        );
+    }
     ctx.fillColor(c);
     ctx.fill();
 }
