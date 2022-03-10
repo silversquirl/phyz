@@ -4,6 +4,7 @@ const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
 const v = @import("v.zig");
+const MinkowskiDifference = @import("minkowski.zig").MinkowskiDifference;
 const Polygon = @import("Polygon.zig");
 const World = @import("World.zig");
 
@@ -61,6 +62,18 @@ pub fn main() !void {
     defer allocator.free(body_b.shapes);
     body_b.teleport(.{ 400, 100 });
 
+    const body_c = try world.add(.{
+        .shapes = try allocator.dupe(World.Shape, &.{
+            World.Shape.initPoly(.{ 0, 0 }, &[_]v.Vec2{
+                .{ 0, 90 },
+                .{ 50, 0 },
+                .{ 100, 90 },
+            }),
+        }),
+    });
+    defer allocator.free(body_c.shapes);
+    body_c.teleport(.{ 600, 100 });
+
     while (!win.shouldClose()) {
         const size = try win.getSize();
         const fbsize = try win.getFramebufferSize();
@@ -75,11 +88,17 @@ pub fn main() !void {
                 @intToFloat(f32, size.width),
         );
 
-        for (body_a.shapes) |shape| {
-            drawPoly(ctx, shape.shape.poly, 0xffff00ff);
-        }
-        for (body_b.shapes) |shape| {
-            drawPoly(ctx, shape.shape.poly, 0x00ffffff);
+        const colors = [_]u32{
+            0xffff00ff,
+            0x00ffffff,
+            0xff00ffff,
+            0x00ff00ff,
+            0xff0000ff,
+        };
+        for (world.bodies.items) |body, i| {
+            for (body.shapes) |shape| {
+                drawPoly(ctx, shape.shape.poly, colors[i]);
+            }
         }
 
         world.tick(1 / 60.0);
@@ -89,6 +108,38 @@ pub fn main() !void {
         try win.swapBuffers();
         try glfw.pollEvents();
     }
+}
+
+const M = MinkowskiDifference(
+    Polygon,
+    Polygon.support,
+    Polygon,
+    Polygon.support,
+);
+fn drawMinkowski(ctx: *nanovg.Context, off: v.Vec2, m: M, color: u32) void {
+    const c = nanovg.Color.hex(color);
+    ctx.beginPath();
+    ctx.circle(
+        @floatCast(f32, off[0]),
+        @floatCast(f32, off[1]),
+        8,
+    );
+    ctx.strokeColor(c);
+    ctx.stroke();
+
+    ctx.beginPath();
+    for (m.a.verts) |av| {
+        for (m.b.verts) |bv| {
+            const vert = (av + m.a.offset) - (bv + m.b.offset) + off;
+            ctx.circle(
+                @floatCast(f32, vert[0]),
+                @floatCast(f32, vert[1]),
+                4,
+            );
+        }
+    }
+    ctx.fillColor(c);
+    ctx.fill();
 }
 
 fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
@@ -106,6 +157,33 @@ fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
         );
     }
     ctx.closePath();
+    var c = nanovg.Color.hex(color);
+    ctx.strokeColor(c);
+    ctx.stroke();
+    c.a *= 0.5;
+    ctx.fillColor(c);
+    ctx.fill();
+
+    ctx.beginPath();
+    for (poly.verts) |raw_vert| {
+        const vert = raw_vert + poly.offset;
+        ctx.circle(
+            @floatCast(f32, vert[0]),
+            @floatCast(f32, vert[1]),
+            3,
+        );
+    }
+    ctx.fillColor(c);
+    ctx.fill();
+}
+
+fn drawPoint(ctx: *nanovg.Context, p: v.Vec2, color: u32) void {
+    ctx.beginPath();
+    ctx.circle(
+        @floatCast(f32, p[0]),
+        @floatCast(f32, p[1]),
+        5,
+    );
     ctx.fillColor(nanovg.Color.hex(color));
     ctx.fill();
 }

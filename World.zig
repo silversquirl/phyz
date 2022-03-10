@@ -55,7 +55,15 @@ pub const Body = struct {
         var direction = self.vel / v.v(speed);
         var distance = speed * dt;
 
+        var i: usize = 0;
         move: while (distance > world.slop) {
+            if (@import("builtin").mode == .Debug) {
+                i += 1;
+                if (i > 1_000_000) {
+                    std.debug.panic("Body {*} failed to converge after 1 million iterations", .{self});
+                }
+            }
+
             var step = distance;
             // OPTIM: can skip re-testing non-critical shapes
             for (self.shapes) |*shape| {
@@ -76,7 +84,7 @@ pub const Body = struct {
                 }
 
                 std.debug.assert(q.distance <= step);
-                step = q.distance;
+                step = q.distance * 0.99;
             }
 
             const step_v = direction * v.v(step);

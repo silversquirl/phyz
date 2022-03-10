@@ -1,7 +1,7 @@
 const std = @import("std");
 const v = @import("v.zig");
 
-offset: v.Vec2 = .{ 0, 0 },
+offset: v.Vec2 = v.v(0),
 verts: []const v.Vec2,
 
 const Polygon = @This();
