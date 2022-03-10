@@ -1,195 +1,33 @@
-//! Narrow-phase convex polygon collision
-//! The implementations here are stupidly slow right now, will optimize later
-//! when I can be bothered to actually read papers on this topic.
-
 const std = @import("std");
-const Vec2 = std.meta.Vector(2, f64);
+const v = @import("v.zig");
 
-offset: Vec2 = Vec2{ 0, 0 },
-verts: []const Vec2,
+offset: v.Vec2 = .{ 0, 0 },
+verts: []const v.Vec2,
 
 const Polygon = @This();
 
 /// Vertices must be anti-clockwise.
 /// Polygon must be convex.
-pub fn init(offset: Vec2, verts: []const Vec2) Polygon {
+pub fn init(offset: v.Vec2, verts: []const v.Vec2) Polygon {
     // Check anti-clockwise
     const ab = verts[0] - verts[1];
     const ac = verts[2] - verts[1];
-    std.debug.assert(@reduce(.Add, Vec2{ ab[1], -ab[0] } * ac) > 0);
+    std.debug.assert(@reduce(.Add, v.Vec2{ ab[1], -ab[0] } * ac) > 0);
 
     return .{ .offset = offset, .verts = verts };
 }
 
 /// Returns the furthest vertex in direction d
-pub fn support(self: Polygon, d: Vec2) Vec2 {
+pub fn support(self: Polygon, d: v.Vec2) v.Vec2 {
     var max_dot = -std.math.inf(f64);
-    var max_v: Vec2 = undefined;
+    var max_v: v.Vec2 = undefined;
     // TODO: binary search
-    for (self.verts) |v| {
-        const dot = @reduce(.Add, d * v);
+    for (self.verts) |vert| {
+        const dot = v.dot(d, vert);
         if (dot > max_dot) {
             max_dot = dot;
-            max_v = v;
+            max_v = vert;
         }
     }
     return max_v + self.offset;
-}
-
-/// Query distance, normal, and closest points between two polygons
-pub fn queryPoint(self: Polygon, point: Vec2) QueryResult {
-    var r = QueryResult{
-        .distance = std.math.inf(f64),
-        .normal = undefined,
-        .a = undefined,
-        .b = point,
-    };
-
-    // FIXME: O(n)
-    for (self.verts) |raw_vert| {
-        const v = raw_vert + self.offset;
-        const normal = point - v;
-        const sqdist = @reduce(.Add, normal * normal);
-        if (sqdist < r.distance) {
-            r.distance = sqdist;
-            r.normal = normal;
-            r.a = v;
-        }
-    }
-
-    r.distance = @sqrt(r.distance);
-    r.normal /= @splat(2, r.distance);
-
-    // FIXME: O(n)
-    var a = self.verts[self.verts.len - 1] + self.offset;
-    for (self.verts) |raw_b| {
-        const b = raw_b + self.offset;
-        defer a = b;
-
-        const ab = b - a;
-        const normal = normalize(Vec2{ -ab[1], ab[0] });
-
-        // Check distance
-        const dist = @reduce(.Add, (point - a) * normal);
-        if (@fabs(dist) >= r.distance) continue;
-
-        // Check we're actually on the normal
-        if (@reduce(.Add, (point - a) * ab) < 0) continue;
-        if (@reduce(.Add, (point - b) * -ab) < 0) continue;
-
-        r.distance = dist;
-        r.normal = normal;
-        r.a = point - @splat(2, dist) * normal;
-    }
-
-    return r;
-}
-
-/// Query distance, normal, and closest points between two polygons
-pub fn queryPoly(self: Polygon, other: Polygon) QueryResult {
-    const a = self.queryEdges(other);
-    const b = other.queryEdges(self);
-    const c = self.queryVerts(other);
-
-    var r = QueryResult{
-        .distance = a.distance,
-        .normal = a.normal,
-        .a = a.vert,
-        .b = a.vert + @splat(2, a.distance) * a.normal,
-    };
-    if (c.distance < r.distance) {
-        r = .{
-            .distance = c.distance,
-            .normal = c.normal,
-            .a = c.vert,
-            .b = c.vert + @splat(2, c.distance) * c.normal,
-        };
-    }
-    if (b.distance < r.distance) {
-        r = .{
-            .distance = b.distance,
-            .normal = -b.normal,
-            .a = b.vert + @splat(2, b.distance) * b.normal,
-            .b = b.vert,
-        };
-    }
-
-    return r;
-}
-pub const QueryResult = struct {
-    distance: f64, // Distance between the polygons
-    normal: Vec2, // Normalized normal vector
-    a: Vec2, // Close point on self
-    b: Vec2, // Close point on other
-};
-
-// Query self's vertices against other's edges
-fn queryEdges(self: Polygon, other: Polygon) SingleQueryResult {
-    var result = SingleQueryResult{};
-    // FIXME: O(n^2)
-    var a = other.verts[other.verts.len - 1] + other.offset;
-    for (other.verts) |raw_b| {
-        const b = raw_b + other.offset;
-        const ab = b - a;
-        const normal = normalize(.{ -ab[1], ab[0] });
-        for (self.verts) |raw_vert| {
-            const v = raw_vert + self.offset;
-
-            // Check distance
-            const dist = @reduce(.Add, (v - a) * normal);
-            if (@fabs(dist) >= result.distance) continue;
-
-            // Check we're actually on the normal
-            if (@reduce(.Add, (v - a) * ab) < 0) continue;
-            if (@reduce(.Add, (v - b) * -ab) < 0) continue;
-
-            result = .{
-                .distance = @fabs(dist),
-                // Flip sign because we want the normal from the vertex, not the edge
-                .normal = if (dist < 0) normal else -normal,
-                .vert = v,
-            };
-        }
-        a = b;
-    }
-    return result;
-}
-
-// Query self's vertices against other's vertices
-fn queryVerts(self: Polygon, other: Polygon) SingleQueryResult {
-    var result = SingleQueryResult{};
-    // FIXME: O(n^2)
-    for (other.verts) |raw_ov| {
-        const ov = raw_ov + other.offset;
-        for (self.verts) |raw_sv| {
-            const sv = raw_sv + self.offset;
-
-            // Check distance
-            const normal = ov - sv;
-            const sqdist = @reduce(.Add, normal * normal);
-            if (sqdist >= result.distance) continue;
-
-            result = .{
-                .distance = sqdist,
-                .normal = normal,
-                .vert = sv,
-            };
-        }
-    }
-
-    result.distance = @sqrt(result.distance);
-    result.normal /= @splat(2, result.distance);
-    return result;
-}
-
-const SingleQueryResult = struct {
-    distance: f64 = std.math.inf(f64),
-    normal: Vec2 = undefined,
-    vert: Vec2 = undefined, // Closest vertex
-};
-
-fn normalize(v: Vec2) Vec2 {
-    @setFloatMode(.Optimized);
-    const mag_inv = 1 / @sqrt(@reduce(.Add, v * v));
-    return v * @splat(2, mag_inv);
 }
