@@ -1,20 +1,23 @@
 const std = @import("std");
+
+const gjk = @import("gjk.zig");
+const v = @import("v.zig");
+const MinkowskiDifference = @import("minkowski.zig").MinkowskiDifference;
 const Polygon = @import("Polygon.zig");
-const Vec2 = std.meta.Vector(2, f64);
 
 const World = @This();
 
 allocator: std.mem.Allocator,
 bodies: std.ArrayListUnmanaged(Body) = .{},
-gravity: Vec2 = .{ 0, 0 },
+gravity: v.Vec2 = .{ 0, 0 },
 slop: f64 = 0.1, // Distance to which collision must be accurate
 
 pub const Body = struct {
     kind: Kind = .dynamic,
     mass: f64 = 1.0, // Mass for the entire body
-    pos: Vec2 = Vec2{ 0, 0 }, // Current position
-    vel: Vec2 = Vec2{ 0, 0 }, // Current velocity
-    force: Vec2 = Vec2{ 0, 0 }, // Instantaneous force (reset to 0 every tick)
+    pos: v.Vec2 = v.Vec2{ 0, 0 }, // Current position
+    vel: v.Vec2 = v.Vec2{ 0, 0 }, // Current velocity
+    force: v.Vec2 = v.Vec2{ 0, 0 }, // Instantaneous force (reset to 0 every tick)
 
     shapes: []Shape,
 
@@ -24,7 +27,7 @@ pub const Body = struct {
         static,
     };
 
-    pub fn teleport(self: *Body, pos: Vec2) void {
+    pub fn teleport(self: *Body, pos: v.Vec2) void {
         const d = pos - self.pos;
         self.pos = pos;
         for (self.shapes) |*shape| {
@@ -42,14 +45,14 @@ pub const Body = struct {
         }
 
         self.vel =
-            v(0.99) * self.vel +
-            v(dt) * world.gravity +
-            v(self.mass) * self.force;
-        self.force = Vec2{ 0, 0 };
+            v.v(0.99) * self.vel +
+            v.v(dt) * world.gravity +
+            v.v(self.mass) * self.force;
+        self.force = v.Vec2{ 0, 0 };
 
         const speed = @sqrt(@reduce(.Add, self.vel * self.vel));
         if (speed == 0) return;
-        var direction = self.vel / v(speed);
+        var direction = self.vel / v.v(speed);
         var distance = speed * dt;
 
         move: while (distance > world.slop) {
@@ -61,10 +64,10 @@ pub const Body = struct {
                     // TODO: friction, bounce
 
                     // Project velocity onto collided face
-                    const axis = Vec2{ -q.normal[1], q.normal[0] };
-                    const p = @reduce(.Add, axis * direction);
+                    const axis = v.Vec2{ -q.normal[1], q.normal[0] };
+                    const p = v.dot(axis, direction);
                     // Apply projected velocity to body
-                    self.vel = axis * v(speed * p);
+                    self.vel = axis * v.v(speed * p);
                     direction = if (p < 0) -axis else axis;
                     distance *= @fabs(p);
 
@@ -76,7 +79,7 @@ pub const Body = struct {
                 step = q.distance;
             }
 
-            const step_v = direction * v(step);
+            const step_v = direction * v.v(step);
             distance -= step;
             self.pos += step_v;
             // OPTIM: offset shapes by body position at query time instead?
@@ -95,76 +98,52 @@ pub const Shape = struct {
     bounce: f64 = 0.0,
 
     shape: union(enum) {
-        point: Vec2,
+        point: v.Vec2,
         poly: Polygon,
     },
 
-    pub fn initPoint(p: Vec2) Shape {
+    pub fn initPoint(p: v.Vec2) Shape {
         return .{ .shape = .{ .point = p } };
     }
-    pub fn initPoly(verts: []const Vec2) Shape {
-        return .{ .shape = .{ .poly = Polygon.init(verts) } };
+    pub fn initPoly(offset: v.Vec2, verts: []const v.Vec2) Shape {
+        return .{ .shape = .{ .poly = Polygon.init(offset, verts) } };
     }
 
     /// Move the shape by a vector offset.
-    pub fn move(self: *Shape, offset: Vec2) void {
+    pub fn move(self: *Shape, offset: v.Vec2) void {
         switch (self.shape) {
             .point => |*p| p.* += offset,
             .poly => |*p| p.offset += offset,
         }
     }
 
-    /// Get the distance and normal between two shapes.
-    pub fn query(a: Shape, b: Shape) Query {
-        var q = a.rawQuery(b);
-        q.distance -= a.radius + b.radius;
-        return q;
+    pub fn support(self: Shape, d: v.Vec2) v.Vec2 {
+        const p = switch (self.shape) {
+            .point => |p| p,
+            .poly => |p| p.support(d),
+        };
+        return p + v.normalize(d) * v.v(self.radius);
     }
 
-    /// Get the distance and normal between two shapes.
-    /// Does not account for radius.
-    fn rawQuery(a: Shape, b: Shape) Query {
-        switch (a.shape) {
-            .point => |ap| switch (b.shape) {
-                .point => |bp| {
-                    const ab = bp - ap;
-                    const distance = @sqrt(@reduce(.Add, ab * ab));
-                    return .{
-                        .distance = distance,
-                        .normal = ab / v(distance),
-                    };
-                },
-
-                .poly => |bp| {
-                    const q = bp.queryPoint(ap);
-                    return .{
-                        .distance = q.distance,
-                        .normal = -q.normal,
-                    };
-                },
-            },
-
-            .poly => |ap| {
-                const q = switch (b.shape) {
-                    .point => |bp| ap.queryPoint(bp),
-                    .poly => |bp| ap.queryPoly(bp),
-                };
-                return .{
-                    .distance = q.distance,
-                    .normal = q.normal,
-                };
-            },
-        }
+    /// Get the vector distance between two shapes.
+    pub fn query(a: Shape, b: Shape) v.Vec2 {
+        const M = MinkowskiDifference(
+            Shape,
+            Shape.support,
+            Shape,
+            Shape.support,
+        );
+        return gjk.minimumPoint(M{ .a = b, .b = a }, M.support);
     }
-
-    pub const Query = struct {
-        distance: f64,
-        normal: Vec2,
-    };
 };
 
-pub fn add(self: *World, body: Body) !void {
+pub fn deinit(self: *World) void {
+    self.bodies.deinit(self.allocator);
+}
+
+pub fn add(self: *World, body: Body) !*Body {
     try self.bodies.append(self.allocator, body);
+    return &self.bodies.items[self.bodies.items.len - 1];
 }
 
 pub fn tick(self: *World, dt: f64) void {
@@ -175,11 +154,11 @@ pub fn tick(self: *World, dt: f64) void {
 
 /// Query movement for a shape along a given vector.
 /// Returns the safe movement distance, closest shape along the path (ish), and normal to that shape.
-fn moveQuery(self: World, shape: *const Shape, direction: Vec2, distance: f64) MoveQuery {
+fn moveQuery(self: World, shape: *const Shape, direction: v.Vec2, distance: f64) MoveQuery {
     var result = MoveQuery{
-        .distance = distance,
+        .distance = distance * distance,
         .shape = null,
-        .normal = Vec2{ 0, 0 },
+        .normal = v.Vec2{ 0, 0 },
     };
 
     // TODO: broad phase
@@ -187,29 +166,25 @@ fn moveQuery(self: World, shape: *const Shape, direction: Vec2, distance: f64) M
         for (body.shapes) |*target| {
             if (shape == target) continue;
 
-            _ = direction;
-            const q = shape.query(target.*);
-            if (q.distance < result.distance and // Closer than previous
-                // true)
-                @reduce(.Add, direction * q.normal) > 0) // Moving towards the collision
+            const vec = shape.query(target.*);
+            if (v.dot(vec, vec) < result.distance and // Closer than previous
+                v.dot(vec, direction) > std.math.epsilon(f64)) // Moving towards the collision
             {
                 result = .{
-                    .distance = q.distance,
+                    .distance = v.dot(vec, vec),
                     .shape = target,
-                    .normal = q.normal,
+                    .normal = -vec,
                 };
             }
         }
     }
 
+    result.distance = @sqrt(result.distance);
+    result.normal /= v.v(result.distance);
     return result;
 }
 const MoveQuery = struct {
     distance: f64,
     shape: ?*const Shape,
-    normal: Vec2,
+    normal: v.Vec2,
 };
-
-fn v(x: f64) Vec2 {
-    return @splat(2, x);
-}

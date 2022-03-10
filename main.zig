@@ -3,15 +3,15 @@ const gl = @import("zgl");
 const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
-const gjk = @import("gjk.zig");
 const v = @import("v.zig");
-const MinkowskiDifference = @import("minkowski.zig").MinkowskiDifference;
 const Polygon = @import("Polygon.zig");
 const World = @import("World.zig");
 
-const M = MinkowskiDifference(Polygon, Polygon);
-
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     try glfw.init(.{});
     defer glfw.terminate();
 
@@ -22,22 +22,45 @@ pub fn main() !void {
     const ctx = nanovg.Context.createGl3(.{});
     defer ctx.deleteGl3();
 
-    const poly = Polygon.init(.{ 300, 300 }, &[_]v.Vec2{
-        .{ 160, 0 },
-        .{ 200, 110 },
-        .{ 100, 380 },
-        .{ 0, 110 },
-        .{ 40, 0 },
-    });
-
-    var poly2 = Polygon.init(.{ 0, 0 }, &[_]v.Vec2{
-        .{ -50, -50 },
-        .{ 50, -50 },
-        .{ 50, 50 },
-        .{ -50, 50 },
-    });
-
     gl.clearColor(0, 0, 0, 1);
+
+    var world = World{
+        .allocator = allocator,
+        .gravity = .{ 0, 1000 },
+    };
+    defer world.deinit();
+
+    const body_a = try world.add(.{
+        .kind = .static,
+        .shapes = try allocator.dupe(World.Shape, &.{
+            World.Shape.initPoly(.{ 0, 0 }, &[_]v.Vec2{
+                .{ 100, 500 },
+                .{ 400, 500 },
+                .{ 500, 700 },
+                .{ 200, 700 },
+            }),
+            World.Shape.initPoly(.{ 0, 0 }, &[_]v.Vec2{
+                .{ 1000, 800 },
+                .{ 1000, 900 },
+                .{ 400, 900 },
+                .{ 400, 800 },
+            }),
+        }),
+    });
+    defer allocator.free(body_a.shapes);
+
+    const body_b = try world.add(.{
+        .shapes = try allocator.dupe(World.Shape, &.{
+            World.Shape.initPoly(.{ 0, 0 }, &[_]v.Vec2{
+                .{ 0, 0 },
+                .{ 100, 0 },
+                .{ 50, 90 },
+            }),
+        }),
+    });
+    defer allocator.free(body_b.shapes);
+    body_b.teleport(.{ 400, 100 });
+
     while (!win.shouldClose()) {
         const size = try win.getSize();
         const fbsize = try win.getFramebufferSize();
@@ -52,40 +75,20 @@ pub fn main() !void {
                 @intToFloat(f32, size.width),
         );
 
-        const mouse_i = try win.getCursorPos();
-        const mouse = v.Vec2{
-            mouse_i.xpos,
-            mouse_i.ypos,
-        };
-        _ = mouse;
-        poly2.offset = mouse;
+        for (body_a.shapes) |shape| {
+            drawPoly(ctx, shape.shape.poly, 0xffff00ff);
+        }
+        for (body_b.shapes) |shape| {
+            drawPoly(ctx, shape.shape.poly, 0x00ffffff);
+        }
 
-        drawPoly(ctx, poly, 0x00ffffff);
-        drawPoly(ctx, poly2, 0xffff00ff);
-        const m = M{ .a = poly, .b = poly2 };
-        drawVector(ctx, mouse, gjk.minimumPoint(m, M.support), 0x00ff00ff);
+        world.tick(1 / 60.0);
 
         ctx.endFrame();
 
         try win.swapBuffers();
         try glfw.pollEvents();
     }
-}
-
-fn drawMinkowski(ctx: *nanovg.Context, m: M, color: u32) void {
-    ctx.beginPath();
-    for (m.a.verts) |av| {
-        for (m.b.verts) |bv| {
-            const vert = (av + m.a.offset) - (bv + m.b.offset);
-            ctx.circle(
-                @floatCast(f32, vert[0]),
-                @floatCast(f32, vert[1]),
-                4,
-            );
-        }
-    }
-    ctx.fillColor(nanovg.Color.hex(color));
-    ctx.fill();
 }
 
 fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
@@ -103,33 +106,6 @@ fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
         );
     }
     ctx.closePath();
-    var c = nanovg.Color.hex(color);
-    ctx.strokeColor(c);
-    ctx.stroke();
-    c.a *= 0.5;
-    ctx.fillColor(c);
-    ctx.fill();
-
-    ctx.beginPath();
-    for (poly.verts) |raw_vert| {
-        const vert = raw_vert + poly.offset;
-        ctx.circle(
-            @floatCast(f32, vert[0]),
-            @floatCast(f32, vert[1]),
-            3,
-        );
-    }
-    ctx.fillColor(c);
-    ctx.fill();
-}
-
-fn drawPoint(ctx: *nanovg.Context, p: v.Vec2, color: u32) void {
-    ctx.beginPath();
-    ctx.circle(
-        @floatCast(f32, p[0]),
-        @floatCast(f32, p[1]),
-        5,
-    );
     ctx.fillColor(nanovg.Color.hex(color));
     ctx.fill();
 }
@@ -160,34 +136,6 @@ fn drawVector(ctx: *nanovg.Context, start: v.Vec2, dir: v.Vec2, color: u32) void
     ctx.lineTo(
         @floatCast(f32, arrow1[0]),
         @floatCast(f32, arrow1[1]),
-    );
-    ctx.strokeColor(nanovg.Color.hex(color));
-    ctx.stroke();
-}
-
-fn drawQuery(ctx: *nanovg.Context, q: Polygon.QueryResult, color: u32) void {
-    ctx.beginPath();
-    ctx.circle(
-        @floatCast(f32, q.a[0]),
-        @floatCast(f32, q.a[1]),
-        5,
-    );
-    ctx.circle(
-        @floatCast(f32, q.b[0]),
-        @floatCast(f32, q.b[1]),
-        5,
-    );
-    ctx.fillColor(nanovg.Color.hex(color));
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(
-        @floatCast(f32, q.a[0]),
-        @floatCast(f32, q.a[1]),
-    );
-    ctx.lineTo(
-        @floatCast(f32, q.b[0]),
-        @floatCast(f32, q.b[1]),
     );
     ctx.strokeColor(nanovg.Color.hex(color));
     ctx.stroke();
