@@ -1,9 +1,36 @@
 const std = @import("std");
 const v = @import("v.zig");
 
-// Moves the simplex closer to the origin.
-// Returns the closest point to the origin.
-pub fn approachOrigin(s: *[]v.Vec2) v.Vec2 {
+/// Returns the closest point to the origin.
+pub fn minimumPoint(
+    shape: anytype,
+    comptime support: fn (@TypeOf(shape), d: v.Vec2) v.Vec2,
+) v.Vec2 {
+    var s_buf: [3]v.Vec2 = undefined;
+    var s: []v.Vec2 = s_buf[0..1];
+    s[0] = support(shape, .{ 1, 0 });
+    var closest = s[0];
+    while (true) {
+        const new_point = support(shape, -closest);
+        for (s) |sp| {
+            if (@reduce(.And, sp == new_point)) {
+                return closest;
+            }
+        }
+
+        s.len += 1;
+        s[s.len - 1] = new_point;
+
+        closest = approachOrigin(&s);
+        if (@reduce(.And, closest == v.v(0))) {
+            return closest;
+        }
+    }
+}
+
+/// Moves the simplex closer to the origin.
+/// Returns the closest point to the origin.
+fn approachOrigin(s: *[]v.Vec2) v.Vec2 {
     switch (s.len) {
         2 => {
             const a = s.*[0];

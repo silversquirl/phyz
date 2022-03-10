@@ -19,8 +19,15 @@ pub fn main() !void {
     const ctx = nanovg.Context.createGl3(.{});
     defer ctx.deleteGl3();
 
-    gl.clearColor(0, 0, 0, 1);
+    const poly = Polygon.init(.{ 300, 300 }, &[_]Vec2{
+        .{ 160, 0 },
+        .{ 200, 110 },
+        .{ 100, 380 },
+        .{ 0, 110 },
+        .{ 40, 0 },
+    });
 
+    gl.clearColor(0, 0, 0, 1);
     while (!win.shouldClose()) {
         const size = try win.getSize();
         const fbsize = try win.getFramebufferSize();
@@ -42,25 +49,10 @@ pub fn main() !void {
         };
         _ = mouse;
 
-        var s = [_]Vec2{
-            .{ 100, 100 },
-            .{ 200, 100 },
-            .{ 150, 200 },
-        };
-        drawPoly(ctx, .{ .verts = &s }, 0x00ffffff);
-
-        for (s) |*v| {
-            v.* -= mouse;
-        }
-        var ss: []Vec2 = &s;
-        drawPoint(ctx, gjk.approachOrigin(&ss) + mouse, 0x00ff00ff);
-
-        if (ss.len > 1) {
-            ctx.strokeWidth(3);
-            drawPoly(ctx, .{ .verts = ss, .offset = mouse }, 0xff0000ff);
-        } else if (ss.len > 0) {
-            drawPoint(ctx, ss[0] + mouse, 0xff0000ff);
-        }
+        drawPoly(ctx, poly, 0x00ffffff);
+        var poly2 = poly;
+        poly2.offset -= mouse;
+        drawPoint(ctx, gjk.minimumPoint(poly2, Polygon.support) + mouse, 0x00ff00ff);
 
         ctx.endFrame();
 

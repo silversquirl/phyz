@@ -12,13 +12,28 @@ const Polygon = @This();
 
 /// Vertices must be anti-clockwise.
 /// Polygon must be convex.
-pub fn init(verts: []const Vec2) Polygon {
+pub fn init(offset: Vec2, verts: []const Vec2) Polygon {
     // Check anti-clockwise
     const ab = verts[0] - verts[1];
     const ac = verts[2] - verts[1];
     std.debug.assert(@reduce(.Add, Vec2{ ab[1], -ab[0] } * ac) > 0);
 
-    return .{ .verts = verts };
+    return .{ .offset = offset, .verts = verts };
+}
+
+/// Returns the furthest vertex in direction d
+pub fn support(self: Polygon, d: Vec2) Vec2 {
+    var max_dot = -std.math.inf(f64);
+    var max_v: Vec2 = undefined;
+    // TODO: binary search
+    for (self.verts) |v| {
+        const dot = @reduce(.Add, d * v);
+        if (dot > max_dot) {
+            max_dot = dot;
+            max_v = v;
+        }
+    }
+    return max_v + self.offset;
 }
 
 /// Query distance, normal, and closest points between two polygons
