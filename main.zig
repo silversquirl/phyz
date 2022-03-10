@@ -3,15 +3,12 @@ const gl = @import("zgl");
 const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
+const gjk = @import("gjk.zig");
 const Polygon = @import("Polygon.zig");
 const World = @import("World.zig");
 const Vec2 = std.meta.Vector(2, f64);
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
     try glfw.init(.{});
     defer glfw.terminate();
 
@@ -23,42 +20,6 @@ pub fn main() !void {
     defer ctx.deleteGl3();
 
     gl.clearColor(0, 0, 0, 1);
-
-    var world = World{
-        .allocator = allocator,
-        .gravity = .{ 0, 1000 },
-    };
-
-    const body_a = World.Body{
-        .kind = .static,
-        .shapes = try allocator.dupe(World.Shape, &.{
-            World.Shape.initPoly(&[_]Vec2{
-                .{ 100, 500 },
-                .{ 400, 500 },
-                .{ 500, 700 },
-                .{ 200, 700 },
-            }),
-            World.Shape.initPoly(&[_]Vec2{
-                .{ 1000, 800 },
-                .{ 1000, 900 },
-                .{ 400, 900 },
-                .{ 400, 800 },
-            }),
-        }),
-    };
-    try world.add(body_a);
-
-    var body_b = World.Body{
-        .shapes = try allocator.dupe(World.Shape, &.{
-            World.Shape.initPoly(&[_]Vec2{
-                .{ 200, 100 },
-                .{ 300, 100 },
-                .{ 250, 190 },
-            }),
-        }),
-    };
-    body_b.teleport(.{ 200, 0 });
-    try world.add(body_b);
 
     while (!win.shouldClose()) {
         const size = try win.getSize();
@@ -74,26 +35,32 @@ pub fn main() !void {
                 @intToFloat(f32, size.width),
         );
 
-        // const mouse_i = try win.getCursorPos();
-        // const mouse = Vec2{
-        //     mouse_i.xpos,
-        //     mouse_i.ypos,
-        // };
+        const mouse_i = try win.getCursorPos();
+        const mouse = Vec2{
+            mouse_i.xpos,
+            mouse_i.ypos,
+        };
+        _ = mouse;
 
-        for (body_a.shapes) |shape| {
-            drawPoly(ctx, shape.shape.poly, 0xffff00ff);
-        }
-        for (body_b.shapes) |shape| {
-            drawPoly(ctx, shape.shape.poly, 0x00ffffff);
-        }
-        for (body_a.shapes) |sa| {
-            for (body_b.shapes) |sb| {
-                var q = sb.shape.poly.queryPoly(sa.shape.poly);
-                drawQuery(ctx, q, 0xff0000ff);
-            }
-        }
+        var s = [_]Vec2{
+            .{ 100, 100 },
+            .{ 200, 100 },
+            .{ 150, 200 },
+        };
+        drawPoly(ctx, .{ .verts = &s }, 0x00ffffff);
 
-        world.tick(1 / 60.0);
+        for (s) |*v| {
+            v.* -= mouse;
+        }
+        var ss: []Vec2 = &s;
+        drawPoint(ctx, gjk.approachOrigin(&ss) + mouse, 0x00ff00ff);
+
+        if (ss.len > 1) {
+            ctx.strokeWidth(3);
+            drawPoly(ctx, .{ .verts = ss, .offset = mouse }, 0xff0000ff);
+        } else if (ss.len > 0) {
+            drawPoint(ctx, ss[0] + mouse, 0xff0000ff);
+        }
 
         ctx.endFrame();
 
@@ -117,6 +84,21 @@ fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
         );
     }
     ctx.closePath();
+    var c = nanovg.Color.hex(color);
+    ctx.strokeColor(c);
+    ctx.stroke();
+    c.a *= 0.5;
+    ctx.fillColor(c);
+    ctx.fill();
+}
+
+fn drawPoint(ctx: *nanovg.Context, p: Vec2, color: u32) void {
+    ctx.beginPath();
+    ctx.circle(
+        @floatCast(f32, p[0]),
+        @floatCast(f32, p[1]),
+        5,
+    );
     ctx.fillColor(nanovg.Color.hex(color));
     ctx.fill();
 }
