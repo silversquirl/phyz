@@ -39,3 +39,14 @@ pub inline fn tripleCross(a: Vec2, b: Vec2, c: Vec2) Vec2 {
         c[0] * (k[0] - k[1]),
     };
 }
+
+/// Rotate vector a by rotating the vector (1, 0) to vector b
+pub inline fn rotate(a: Vec2, b: Vec2) Vec2 {
+    // This is just a complex number multiply
+    const p = a * Vec2{ b[0], b[0] };
+    const q =
+        Vec2{ a[1], a[0] } *
+        Vec2{ b[1], b[1] } *
+        Vec2{ -1, 1 };
+    return p + q;
+}

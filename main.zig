@@ -4,10 +4,10 @@ const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
 const gjk = @import("gjk.zig");
+const v = @import("v.zig");
 const MinkowskiDifference = @import("minkowski.zig").MinkowskiDifference;
 const Polygon = @import("Polygon.zig");
 const World = @import("World.zig");
-const Vec2 = std.meta.Vector(2, f64);
 
 const M = MinkowskiDifference(Polygon, Polygon);
 
@@ -22,7 +22,7 @@ pub fn main() !void {
     const ctx = nanovg.Context.createGl3(.{});
     defer ctx.deleteGl3();
 
-    const poly = Polygon.init(.{ 300, 300 }, &[_]Vec2{
+    const poly = Polygon.init(.{ 300, 300 }, &[_]v.Vec2{
         .{ 160, 0 },
         .{ 200, 110 },
         .{ 100, 380 },
@@ -30,7 +30,7 @@ pub fn main() !void {
         .{ 40, 0 },
     });
 
-    var poly2 = Polygon.init(.{ 0, 0 }, &[_]Vec2{
+    var poly2 = Polygon.init(.{ 0, 0 }, &[_]v.Vec2{
         .{ -50, -50 },
         .{ 50, -50 },
         .{ 50, 50 },
@@ -53,7 +53,7 @@ pub fn main() !void {
         );
 
         const mouse_i = try win.getCursorPos();
-        const mouse = Vec2{
+        const mouse = v.Vec2{
             mouse_i.xpos,
             mouse_i.ypos,
         };
@@ -63,8 +63,7 @@ pub fn main() !void {
         drawPoly(ctx, poly, 0x00ffffff);
         drawPoly(ctx, poly2, 0xffff00ff);
         const m = M{ .a = poly, .b = poly2 };
-        drawMinkowski(ctx, m, 0xff00ffaa);
-        drawPoint(ctx, gjk.minimumPoint(m, M.support) + mouse, 0x00ff00ff);
+        drawVector(ctx, mouse, gjk.minimumPoint(m, M.support), 0x00ff00ff);
 
         ctx.endFrame();
 
@@ -77,10 +76,10 @@ fn drawMinkowski(ctx: *nanovg.Context, m: M, color: u32) void {
     ctx.beginPath();
     for (m.a.verts) |av| {
         for (m.b.verts) |bv| {
-            const v = (av + m.a.offset) - (bv + m.b.offset);
+            const vert = (av + m.a.offset) - (bv + m.b.offset);
             ctx.circle(
-                @floatCast(f32, v[0]),
-                @floatCast(f32, v[1]),
+                @floatCast(f32, vert[0]),
+                @floatCast(f32, vert[1]),
                 4,
             );
         }
@@ -97,10 +96,10 @@ fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
         @floatCast(f32, v0[1]),
     );
     for (poly.verts[1..]) |raw_vert| {
-        const v = raw_vert + poly.offset;
+        const vert = raw_vert + poly.offset;
         ctx.lineTo(
-            @floatCast(f32, v[0]),
-            @floatCast(f32, v[1]),
+            @floatCast(f32, vert[0]),
+            @floatCast(f32, vert[1]),
         );
     }
     ctx.closePath();
@@ -113,10 +112,10 @@ fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
 
     ctx.beginPath();
     for (poly.verts) |raw_vert| {
-        const v = raw_vert + poly.offset;
+        const vert = raw_vert + poly.offset;
         ctx.circle(
-            @floatCast(f32, v[0]),
-            @floatCast(f32, v[1]),
+            @floatCast(f32, vert[0]),
+            @floatCast(f32, vert[1]),
             3,
         );
     }
@@ -124,7 +123,7 @@ fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
     ctx.fill();
 }
 
-fn drawPoint(ctx: *nanovg.Context, p: Vec2, color: u32) void {
+fn drawPoint(ctx: *nanovg.Context, p: v.Vec2, color: u32) void {
     ctx.beginPath();
     ctx.circle(
         @floatCast(f32, p[0]),
@@ -133,6 +132,37 @@ fn drawPoint(ctx: *nanovg.Context, p: Vec2, color: u32) void {
     );
     ctx.fillColor(nanovg.Color.hex(color));
     ctx.fill();
+}
+
+fn drawVector(ctx: *nanovg.Context, start: v.Vec2, dir: v.Vec2, color: u32) void {
+    const end = start + dir;
+    const d = (end - start) * v.v(0.1);
+    const arrow0 = end + v.rotate(v.Vec2{ -1, 0.5 }, d);
+    const arrow1 = end + v.rotate(v.Vec2{ -1, -0.5 }, d);
+
+    ctx.beginPath();
+    ctx.moveTo(
+        @floatCast(f32, start[0]),
+        @floatCast(f32, start[1]),
+    );
+    ctx.lineTo(
+        @floatCast(f32, end[0]),
+        @floatCast(f32, end[1]),
+    );
+    ctx.lineTo(
+        @floatCast(f32, arrow0[0]),
+        @floatCast(f32, arrow0[1]),
+    );
+    ctx.moveTo(
+        @floatCast(f32, end[0]),
+        @floatCast(f32, end[1]),
+    );
+    ctx.lineTo(
+        @floatCast(f32, arrow1[0]),
+        @floatCast(f32, arrow1[1]),
+    );
+    ctx.strokeColor(nanovg.Color.hex(color));
+    ctx.stroke();
 }
 
 fn drawQuery(ctx: *nanovg.Context, q: Polygon.QueryResult, color: u32) void {
