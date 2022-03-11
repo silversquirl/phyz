@@ -110,8 +110,8 @@ pub const Shape = struct {
         poly: Polygon,
     },
 
-    pub fn initPoint(p: v.Vec2) Shape {
-        return .{ .shape = .{ .point = p } };
+    pub fn initPoint(p: v.Vec2, rad: f64) Shape {
+        return .{ .radius = rad, .shape = .{ .point = p } };
     }
     pub fn initPoly(offset: v.Vec2, verts: []const v.Vec2) Shape {
         return .{ .shape = .{ .poly = Polygon.init(offset, verts) } };

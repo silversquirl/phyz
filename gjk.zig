@@ -13,7 +13,7 @@ pub fn minimumPoint(
     while (true) {
         if (@import("builtin").mode == .Debug) {
             i += 1;
-            if (i > 1_000_000) {
+            if (i > 100) {
                 std.debug.panic("GJK failed to converge after 1 million iterations", .{});
             }
         }
@@ -33,7 +33,7 @@ pub fn minimumPoint(
         const new_point = support(shape, normal);
 
         for (s) |sp| {
-            if (@reduce(.And, sp == new_point)) {
+            if (v.close(sp, new_point, 1 << 48)) {
                 return simplexMinimumPoint(s);
             }
         }

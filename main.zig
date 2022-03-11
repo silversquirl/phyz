@@ -29,9 +29,14 @@ pub fn main() !void {
         .allocator = allocator,
         .gravity = .{ 0, 1000 },
     };
-    defer world.deinit();
+    defer {
+        for (world.bodies.items) |body| {
+            allocator.free(body.shapes);
+        }
+        world.deinit();
+    }
 
-    const body_a = try world.add(.{
+    _ = try world.add(.{
         .kind = .static,
         .shapes = try allocator.dupe(World.Shape, &.{
             World.Shape.initPoly(.{ 0, 0 }, &[_]v.Vec2{
@@ -48,7 +53,6 @@ pub fn main() !void {
             }),
         }),
     });
-    defer allocator.free(body_a.shapes);
 
     const body_b = try world.add(.{
         .shapes = try allocator.dupe(World.Shape, &.{
@@ -59,7 +63,6 @@ pub fn main() !void {
             }),
         }),
     });
-    defer allocator.free(body_b.shapes);
     body_b.teleport(.{ 400, 100 });
 
     const body_c = try world.add(.{
@@ -71,8 +74,14 @@ pub fn main() !void {
             }),
         }),
     });
-    defer allocator.free(body_c.shapes);
     body_c.teleport(.{ 600, 100 });
+
+    const body_d = try world.add(.{
+        .shapes = try allocator.dupe(World.Shape, &.{
+            World.Shape.initPoint(.{ 0, 0 }, 30),
+        }),
+    });
+    body_d.teleport(.{ 700, 50 });
 
     while (!win.shouldClose()) {
         const size = try win.getSize();
@@ -97,7 +106,7 @@ pub fn main() !void {
         };
         for (world.bodies.items) |body, i| {
             for (body.shapes) |shape| {
-                drawPoly(ctx, shape.shape.poly, colors[i]);
+                drawShape(ctx, shape, colors[i]);
             }
         }
 
@@ -140,6 +149,28 @@ fn drawMinkowski(ctx: *nanovg.Context, off: v.Vec2, m: M, color: u32) void {
     }
     ctx.fillColor(c);
     ctx.fill();
+}
+
+fn drawShape(ctx: *nanovg.Context, shape: World.Shape, color: u32) void {
+    switch (shape.shape) {
+        .point => |p| if (shape.radius == 0) {
+            drawPoint(ctx, p, color);
+        } else {
+            ctx.beginPath();
+            ctx.circle(
+                @floatCast(f32, p[0]),
+                @floatCast(f32, p[1]),
+                @floatCast(f32, shape.radius),
+            );
+            var c = nanovg.Color.hex(color);
+            ctx.strokeColor(c);
+            ctx.stroke();
+            c.a *= 0.5;
+            ctx.fillColor(c);
+            ctx.fill();
+        },
+        .poly => |p| drawPoly(ctx, p, color),
+    }
 }
 
 fn drawPoly(ctx: *nanovg.Context, poly: Polygon, color: u32) void {
