@@ -48,7 +48,7 @@ pub fn main() !void {
         .{ 50, 90 },
     });
 
-    try world.addObject(.{ 600, 100 }, .{}, 0, &[_]v.Vec2{
+    try world.addObject(.{ 600, 100 }, .{}, 50, &[_]v.Vec2{
         .{ 0, 90 },
         .{ 50, 0 },
         .{ 100, 90 },
@@ -80,7 +80,7 @@ pub fn main() !void {
         var i: usize = 0;
         while (it.next()) |c| : (i = (i + 1) % colors.len) {
             drawCollider(ctx, c.pos, c.collider, switch (c.kind) {
-                .static => 0xaaaaaaff,
+                .static => 0xeeff0066,
                 .active => colors[i],
             });
         }
@@ -94,32 +94,48 @@ pub fn main() !void {
     }
 }
 
-fn drawCollider(ctx: *nanovg.Context, pos: v.Vec2, poly: World.Collider, color: u32) void {
-    // TODO: radius
+fn drawCollider(ctx: *nanovg.Context, pos: v.Vec2, c: World.Collider, color: u32) void {
+    var clr = nanovg.Color.hex(color);
+    ctx.strokeColor(clr);
+    clr.a *= 0.5;
+    ctx.fillColor(clr);
 
     ctx.beginPath();
-    const v0 = poly.verts[0] + pos;
-    ctx.moveTo(
-        @floatCast(f32, v0[0]),
-        @floatCast(f32, v0[1]),
-    );
-    for (poly.verts[1..]) |raw_vert| {
+    for (c.verts) |raw_vert, i| {
+        const vprev = c.verts[if (i == 0) c.verts.len - 1 else i - 1];
+        const vnext = c.verts[if (i + 1 == c.verts.len) 0 else i + 1];
+
+        const out = v.conj(vprev - raw_vert);
+        const out_next = v.conj(raw_vert - vnext);
+
+        const a0 = std.math.atan2(
+            f32,
+            @floatCast(f32, out[1]),
+            @floatCast(f32, out[0]),
+        );
+        var a1 = std.math.atan2(
+            f32,
+            @floatCast(f32, out_next[1]),
+            @floatCast(f32, out_next[0]),
+        );
+        if (a1 == a0) a1 += std.math.tau;
+
         const vert = raw_vert + pos;
-        ctx.lineTo(
+        ctx.arc(
             @floatCast(f32, vert[0]),
             @floatCast(f32, vert[1]),
+            @floatCast(f32, c.radius),
+            a0,
+            a1,
+            .cw,
         );
     }
     ctx.closePath();
-    var c = nanovg.Color.hex(color);
-    ctx.strokeColor(c);
     ctx.stroke();
-    c.a *= 0.5;
-    ctx.fillColor(c);
     ctx.fill();
 
     ctx.beginPath();
-    for (poly.verts) |raw_vert| {
+    for (c.verts) |raw_vert| {
         const vert = raw_vert + pos;
         ctx.circle(
             @floatCast(f32, vert[0]),
@@ -127,7 +143,6 @@ fn drawCollider(ctx: *nanovg.Context, pos: v.Vec2, poly: World.Collider, color: 
             3,
         );
     }
-    ctx.fillColor(c);
     ctx.fill();
 }
 
@@ -145,8 +160,8 @@ fn drawPoint(ctx: *nanovg.Context, p: v.Vec2, color: u32) void {
 fn drawVector(ctx: *nanovg.Context, start: v.Vec2, dir: v.Vec2, color: u32) void {
     const end = start + dir;
     const d = (end - start) * v.v(0.1);
-    const arrow0 = end + v.rotate(v.Vec2{ -1, 0.5 }, d);
-    const arrow1 = end + v.rotate(v.Vec2{ -1, -0.5 }, d);
+    const arrow0 = end + v.rotate(.{ -1, 0.5 }, d);
+    const arrow1 = end + v.rotate(.{ -1, -0.5 }, d);
 
     ctx.beginPath();
     ctx.moveTo(

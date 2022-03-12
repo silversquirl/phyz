@@ -27,6 +27,11 @@ pub inline fn normalize(a: Vec2) Vec2 {
     return a * v(invMag(a));
 }
 
+/// (x, y) -> (-y, x)
+pub inline fn conj(a: Vec2) Vec2 {
+    return .{ -a[1], a[0] };
+}
+
 /// Compute (a x b) x c
 ///
 /// Useful for computing perpendicular vectors:

@@ -181,7 +181,7 @@ pub fn tick(self: World, dt: f64) !void {
         for (collisions.items) |coll| {
             const vel = &active.items(.vel)[coll.obj];
             // Project velocity onto collided face
-            const axis = v.Vec2{ -coll.norm[1], coll.norm[0] };
+            const axis = v.conj(coll.norm);
             const p = v.dot(axis, vel.*) / v.dot(axis, axis);
             // Apply projected velocity to body
             vel.* = axis * v.v(p);
