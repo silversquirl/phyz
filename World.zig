@@ -166,7 +166,7 @@ pub fn tick(self: World, dt: f64) !void {
 
             // Advance movement if no collision
             if (!collided) {
-                const move_fac = 0.99 / -min_dot;
+                const move_fac = 0.95 / -min_dot;
                 const move_vec = move * v.v(move_fac);
                 active.items(.pos)[i] += move_vec;
                 movement[i] *= 1 - move_fac;

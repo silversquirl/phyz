@@ -54,7 +54,7 @@ pub fn main() !void {
         .{ 100, 90 },
     });
 
-    try world.addObject(.{ 700, 50 }, .{}, 30, &[_]v.Vec2{.{ 0, 0 }});
+    try world.addObject(.{ 730, 30 }, .{}, 30, &[_]v.Vec2{.{ 0, 0 }});
 
     while (!win.shouldClose()) {
         const size = try win.getSize();
