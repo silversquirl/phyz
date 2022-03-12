@@ -2,197 +2,301 @@ const std = @import("std");
 
 const gjk = @import("gjk.zig");
 const v = @import("v.zig");
-const MinkowskiDifference = @import("minkowski.zig").MinkowskiDifference;
-const Polygon = @import("Polygon.zig");
 
 const World = @This();
 
+comptime {
+    @setFloatMode(.Optimized);
+}
+
 allocator: std.mem.Allocator,
-bodies: std.ArrayListUnmanaged(Body) = .{},
 gravity: v.Vec2 = .{ 0, 0 },
 slop: f64 = 0.1, // Distance to which collision must be accurate
 
-pub const Body = struct {
-    kind: Kind = .dynamic,
-    mass: f64 = 1.0, // Mass for the entire body
-    pos: v.Vec2 = v.Vec2{ 0, 0 }, // Current position
-    vel: v.Vec2 = v.Vec2{ 0, 0 }, // Current velocity
-    force: v.Vec2 = v.Vec2{ 0, 0 }, // Instantaneous force (reset to 0 every tick)
+active: std.MultiArrayList(Object) = .{},
+static: std.ArrayListUnmanaged(Collider.Packed) = .{},
+vertices: std.ArrayListUnmanaged(v.Vec2) = .{},
 
-    shapes: []Shape,
-
-    pub const Kind = enum {
-        dynamic,
-        kinematic,
-        static,
-    };
-
-    pub fn teleport(self: *Body, pos: v.Vec2) void {
-        const d = pos - self.pos;
-        self.pos = pos;
-        for (self.shapes) |*shape| {
-            shape.move(d);
-        }
-    }
-
-    /// Tick body physics
-    fn tick(self: *Body, world: World, dt: f64) void {
-        @setFloatMode(.Optimized);
-        switch (self.kind) {
-            .dynamic => {},
-            .kinematic => return, // TODO
-            .static => return,
-        }
-
-        self.vel =
-            v.v(0.99) * self.vel +
-            v.v(dt) * world.gravity +
-            v.v(self.mass) * self.force;
-        self.force = v.Vec2{ 0, 0 };
-
-        const speed = @sqrt(@reduce(.Add, self.vel * self.vel));
-        if (speed == 0) return;
-        var direction = self.vel / v.v(speed);
-        var distance = speed * dt;
-
-        var i: usize = 0;
-        move: while (distance > world.slop) {
-            if (@import("builtin").mode == .Debug) {
-                i += 1;
-                if (i > 1_000_000) {
-                    std.debug.panic("Body {*} failed to converge after 1 million iterations", .{self});
-                }
-            }
-
-            var step = distance;
-            // OPTIM: can skip re-testing non-critical shapes
-            for (self.shapes) |*shape| {
-                var q = world.moveQuery(shape, direction, step);
-                if (q.distance <= world.slop) {
-                    // TODO: friction, bounce
-
-                    // Project velocity onto collided face
-                    const axis = v.Vec2{ -q.normal[1], q.normal[0] };
-                    const p = v.dot(axis, direction);
-                    // Apply projected velocity to body
-                    self.vel = axis * v.v(speed * p);
-                    direction = if (p < 0) -axis else axis;
-                    distance *= @fabs(p);
-
-                    // Need to redo this step since everything's changed
-                    continue :move;
-                }
-
-                std.debug.assert(q.distance <= step);
-                step = q.distance * 0.99;
-            }
-
-            const step_v = direction * v.v(step);
-            distance -= step;
-            self.pos += step_v;
-            // OPTIM: offset shapes by body position at query time instead?
-            //        Less nice for third-party shape testing, so probably not worth.
-            //        Also this is literally a few vector writes, so not exactly slow.
-            for (self.shapes) |*shape| {
-                shape.move(step_v);
-            }
-        }
-    }
-};
-
-pub const Shape = struct {
-    radius: f64 = 0.0,
-    friction: f64 = 0.0,
-    bounce: f64 = 0.0,
-
-    shape: union(enum) {
-        point: v.Vec2,
-        poly: Polygon,
-    },
-
-    pub fn initPoint(p: v.Vec2, rad: f64) Shape {
-        return .{ .radius = rad, .shape = .{ .point = p } };
-    }
-    pub fn initPoly(offset: v.Vec2, verts: []const v.Vec2) Shape {
-        return .{ .shape = .{ .poly = Polygon.init(offset, verts) } };
-    }
-
-    /// Move the shape by a vector offset.
-    pub fn move(self: *Shape, offset: v.Vec2) void {
-        switch (self.shape) {
-            .point => |*p| p.* += offset,
-            .poly => |*p| p.offset += offset,
-        }
-    }
-
-    pub fn support(self: Shape, d: v.Vec2) v.Vec2 {
-        const p = switch (self.shape) {
-            .point => |p| p,
-            .poly => |p| p.support(d),
-        };
-        return p + v.normalize(d) * v.v(self.radius);
-    }
-
-    /// Get the vector distance between two shapes.
-    pub fn query(a: Shape, b: Shape) v.Vec2 {
-        const M = MinkowskiDifference(
-            Shape,
-            Shape.support,
-            Shape,
-            Shape.support,
-        );
-        return gjk.minimumPoint(M{ .a = b, .b = a }, M.support);
-    }
-};
-
+/// Free all memory associated with the world
 pub fn deinit(self: *World) void {
-    self.bodies.deinit(self.allocator);
+    self.active.deinit(self.allocator);
+    self.static.deinit(self.allocator);
+    self.vertices.deinit(self.allocator);
 }
 
-pub fn add(self: *World, body: Body) !*Body {
-    try self.bodies.append(self.allocator, body);
-    return &self.bodies.items[self.bodies.items.len - 1];
+pub fn addObject(
+    self: *World,
+    pos: v.Vec2,
+    phys: Object.PhysicalProperties,
+    radius: f64,
+    vertices: []const v.Vec2,
+) !void {
+    const coll = try self.addCollider(radius, vertices);
+    errdefer self.vertices.items.len -= vertices.len;
+
+    try self.active.append(self.allocator, .{
+        .pos = pos,
+        .phys = phys,
+        .collider = coll,
+    });
+    errdefer @compileError("TODO");
 }
 
-pub fn tick(self: *World, dt: f64) void {
-    for (self.bodies.items) |*body| {
-        body.tick(self.*, dt);
-    }
+pub fn addStatic(self: *World, radius: f64, vertices: []const v.Vec2) !void {
+    const coll = try self.addCollider(radius, vertices);
+    errdefer self.vertices.items.len -= vertices.len;
+
+    try self.static.append(self.allocator, coll);
+    errdefer @compileError("TODO");
 }
 
-/// Query movement for a shape along a given vector.
-/// Returns the safe movement distance, closest shape along the path (ish), and normal to that shape.
-fn moveQuery(self: World, shape: *const Shape, direction: v.Vec2, distance: f64) MoveQuery {
-    var result = MoveQuery{
-        .distance = distance * distance,
-        .shape = null,
-        .normal = v.Vec2{ 0, 0 },
+fn addCollider(self: *World, radius: f64, vertices: []const v.Vec2) !Collider.Packed {
+    try self.vertices.appendSlice(self.allocator, vertices);
+    return Collider.Packed{
+        .radius = radius,
+        .vert_start = @intCast(u32, self.vertices.items.len - vertices.len),
+        .num_verts = @intCast(u32, vertices.len),
     };
+}
 
-    // TODO: broad phase
-    for (self.bodies.items) |body| {
-        for (body.shapes) |*target| {
-            if (shape == target) continue;
+pub fn colliders(self: *const World) ColliderIterator {
+    return .{
+        .active = self.active.slice(),
+        .static = self.static.items,
+        .vertices = self.vertices.items,
+    };
+}
+pub const ColliderIterator = struct {
+    active: std.MultiArrayList(Object).Slice,
+    static: []Collider.Packed,
+    vertices: []v.Vec2,
+    idx: u32 = 0,
 
-            const vec = shape.query(target.*);
-            if (v.dot(vec, vec) < result.distance and // Closer than previous
-                v.dot(vec, direction) > std.math.epsilon(f64)) // Moving towards the collision
-            {
-                result = .{
-                    .distance = v.dot(vec, vec),
-                    .shape = target,
-                    .normal = -vec,
-                };
-            }
+    pub fn next(self: *ColliderIterator) ?ColliderInfo {
+        if (self.idx < self.active.len) {
+            const coll = self.active.items(.collider)[self.idx];
+            const pos = self.active.items(.pos)[self.idx];
+            self.idx += 1;
+            return ColliderInfo{
+                .kind = .active,
+                .pos = pos,
+                .collider = coll.reify(self.vertices),
+            };
+        } else if (self.idx < self.active.len + self.static.len) {
+            const coll = self.static[self.idx - self.active.len];
+            self.idx += 1;
+            return ColliderInfo{
+                .kind = .static,
+                .pos = v.v(0),
+                .collider = coll.reify(self.vertices),
+            };
+        } else {
+            return null;
         }
     }
+};
+pub const ColliderInfo = struct {
+    kind: enum { active, static },
+    pos: v.Vec2,
+    collider: Collider,
+};
 
-    result.distance = @sqrt(result.distance);
-    result.normal /= v.v(result.distance);
-    return result;
+pub fn tick(self: World, dt: f64) !void {
+    const active = self.active.slice();
+
+    // Apply drag and gravity
+    for (active.items(.vel)) |*vel| {
+        vel.* =
+            v.v(0.99) * vel.* +
+            v.v(dt) * self.gravity;
+    }
+
+    // Init movement amounts for each object
+    var movement = try self.allocator.alloc(f64, active.len);
+    defer self.allocator.free(movement);
+    std.mem.set(f64, movement, dt);
+
+    // Init collision list
+    var collisions = std.ArrayList(CollisionResult).init(self.allocator);
+    defer collisions.deinit();
+
+    var done = false;
+    while (!done) {
+        done = true;
+
+        //// Compute collisions and movement
+        // OPTIM: only iterate objects that haven't converged
+        for (active.items(.pos)) |pos, i| {
+            const info = CollisionInfo{
+                .pos = pos,
+                .collider = active.items(.collider)[i]
+                    .reify(self.vertices.items),
+            };
+
+            const vel = active.items(.vel)[i];
+            const move = v.v(movement[i]) * vel;
+            // const move_mag2i = 1.0 / v.dot(move, move);
+            // std.debug.print("{d} {d} {d}\n", .{ move, vel, movement[i] });
+
+            var min_dot: f64 = -1;
+
+            // TODO: Collide with active objects
+
+            // Collide with static colliders
+            // TODO: broad phase
+            var collided = false;
+            for (self.static.items) |collider| {
+                const norm = collide(info, .{
+                    .pos = .{ 0, 0 },
+                    .collider = collider.reify(self.vertices.items),
+                });
+
+                const mag2 = v.dot(norm, norm);
+                const dot = v.dot(norm, move) / mag2;
+                min_dot = @minimum(dot, min_dot);
+
+                if (dot < -1 and mag2 <= self.slop * self.slop) {
+                    collided = true;
+                    try collisions.append(.{
+                        .norm = norm,
+                        .obj = @intCast(u32, i),
+                    });
+                }
+            }
+
+            // Advance movement if no collision
+            if (!collided) {
+                const move_fac = 0.99 / -min_dot;
+                const move_vec = move * v.v(move_fac);
+                active.items(.pos)[i] += move_vec;
+                movement[i] *= 1 - move_fac;
+            }
+
+            if (collided or movement[i] > self.slop) {
+                done = false;
+            }
+        }
+
+        //// Resolve collisions
+        for (collisions.items) |coll| {
+            const vel = &active.items(.vel)[coll.obj];
+            // Project velocity onto collided face
+            const axis = v.Vec2{ -coll.norm[1], coll.norm[0] };
+            const p = v.dot(axis, vel.*) / v.dot(axis, axis);
+            // Apply projected velocity to body
+            vel.* = axis * v.v(p);
+        }
+        collisions.clearRetainingCapacity();
+    }
 }
-const MoveQuery = struct {
-    distance: f64,
-    shape: ?*const Shape,
-    normal: v.Vec2,
+const CollisionResult = struct {
+    norm: v.Vec2,
+    obj: u32,
+};
+
+fn collide(a: CollisionInfo, b: CollisionInfo) v.Vec2 {
+    const S = struct {
+        a: CollisionInfo,
+        b: CollisionInfo,
+        fn support(pair: @This(), d: v.Vec2) v.Vec2 {
+            // Minkowski difference
+            const as = pair.a.collider.support(d) + pair.a.pos;
+            const bs = pair.b.collider.support(-d) + pair.b.pos;
+            return as - bs;
+        }
+    };
+    return gjk.minimumPoint(S{ .a = a, .b = b }, S.support);
+}
+const CollisionInfo = struct {
+    pos: v.Vec2,
+    collider: Collider,
+};
+
+pub const Object = struct {
+    pos: v.Vec2,
+    vel: v.Vec2 = v.v(0),
+    phys: PhysicalProperties,
+    collider: Collider.Packed,
+
+    pub const PhysicalProperties = struct {
+        mass: f64 = 1.0,
+        friction: f64 = 0.0,
+        bounce: f64 = 0.0,
+    };
+
+    pub const MovementTick = struct {
+        step: v.Vec2,
+        total: v.Vec2,
+    };
+};
+
+pub const Collider = struct {
+    radius: f64 = 0.0,
+    verts: []v.Vec2 = &.{},
+
+    /// Returns the furthest vertex in direction d
+    fn support(self: Collider, d: v.Vec2) v.Vec2 {
+
+        // Start by sampling a few points
+        var supp = Support.init(self.verts, 0, d);
+        _ = supp.improve(self.verts, self.verts.len / 4, d);
+        _ = supp.improve(self.verts, self.verts.len / 2, d);
+        _ = supp.improve(self.verts, 3 * self.verts.len / 4, d);
+
+        // Improve the guess
+        while (supp.climb(self.verts, d)) {}
+
+        // OPTIM: might be faster to branch if radius is 0
+        return self.verts[supp.idx] + v.normalize(d) * v.v(self.radius);
+    }
+
+    const Support = struct {
+        idx: usize,
+        dot: f64,
+
+        fn init(verts: []const v.Vec2, idx: usize, d: v.Vec2) Support {
+            return .{
+                .idx = idx,
+                .dot = v.dot(d, verts[idx]),
+            };
+        }
+
+        fn improve(supp: *Support, verts: []const v.Vec2, idx: usize, d: v.Vec2) bool {
+            const new = Support.init(verts, idx, d);
+            if (new.dot > supp.dot) {
+                supp.* = new;
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        fn climb(supp: *Support, verts: []const v.Vec2, d: v.Vec2) bool {
+            const li = if (supp.idx + 1 >= verts.len)
+                0
+            else
+                supp.idx + 1;
+            const ri = if (supp.idx == 0)
+                verts.len - 1
+            else
+                supp.idx - 1;
+
+            const l_good = supp.improve(verts, li, d);
+            const r_good = supp.improve(verts, ri, d);
+            return l_good or r_good;
+        }
+    };
+
+    pub const Packed = struct {
+        radius: f64,
+        vert_start: u32,
+        num_verts: u32,
+
+        pub fn reify(self: Packed, verts: []v.Vec2) Collider {
+            return .{
+                .radius = self.radius,
+                .verts = verts[self.vert_start .. self.vert_start + self.num_verts],
+            };
+        }
+    };
 };

@@ -1,6 +1,8 @@
 const std = @import("std");
 const v = @import("v.zig");
 
+// TODO: return normalized vector and magnitude, to allow determining normal even in the case of collisions
+
 /// Returns the closest point to the origin.
 pub fn minimumPoint(
     shape: anytype,
@@ -13,7 +15,7 @@ pub fn minimumPoint(
     while (true) {
         if (@import("builtin").mode == .Debug) {
             i += 1;
-            if (i > 100) {
+            if (i > 1_000_000) {
                 std.debug.panic("GJK failed to converge after 1 million iterations", .{});
             }
         }
@@ -31,6 +33,8 @@ pub fn minimumPoint(
             return v.v(0);
         }
         const new_point = support(shape, normal);
+
+        // std.debug.print("{d} {d} {d}\n", .{ new_point, s, normal });
 
         for (s) |sp| {
             if (v.close(sp, new_point, 1 << 48)) {
