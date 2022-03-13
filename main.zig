@@ -29,32 +29,32 @@ pub fn main() !void {
     };
     defer world.deinit();
 
-    try world.addStatic(0, &[_]v.Vec2{
+    try world.addStatic(.{ .verts = &[_]v.Vec2{
         .{ 100, 500 },
         .{ 400, 500 },
         .{ 500, 700 },
         .{ 200, 700 },
-    });
-    try world.addStatic(0, &[_]v.Vec2{
+    } });
+    try world.addStatic(.{ .verts = &[_]v.Vec2{
         .{ 1000, 800 },
         .{ 1000, 900 },
         .{ 400, 900 },
         .{ 400, 800 },
-    });
+    } });
 
-    try world.addObject(.{ 400, 100 }, .{}, 0, &[_]v.Vec2{
+    try world.addObject(.{ 400, 100 }, .{}, .{ .verts = &[_]v.Vec2{
         .{ 0, 0 },
         .{ 100, 0 },
         .{ 50, 90 },
-    });
+    } });
 
-    try world.addObject(.{ 600, 100 }, .{}, 50, &[_]v.Vec2{
+    try world.addObject(.{ 500, 100 }, .{}, .{ .radius = 50, .verts = &[_]v.Vec2{
         .{ 0, 90 },
         .{ 50, 0 },
         .{ 100, 90 },
-    });
+    } });
 
-    try world.addObject(.{ 730, 30 }, .{}, 30, &[_]v.Vec2{.{ 0, 0 }});
+    try world.addObject(.{ 730, 30 }, .{}, .{ .radius = 30, .verts = &[_]v.Vec2{.{ 0, 0 }} });
 
     while (!win.shouldClose()) {
         const size = try win.getSize();

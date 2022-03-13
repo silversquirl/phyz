@@ -28,11 +28,10 @@ pub fn addObject(
     self: *World,
     pos: v.Vec2,
     phys: Object.PhysicalProperties,
-    radius: f64,
-    vertices: []const v.Vec2,
+    collider: Collider,
 ) !void {
-    const coll = try self.addCollider(radius, vertices);
-    errdefer self.vertices.items.len -= vertices.len;
+    const coll = try self.addCollider(collider);
+    errdefer self.vertices.items.len -= collider.verts.len;
 
     try self.active.append(self.allocator, .{
         .pos = pos,
@@ -42,20 +41,22 @@ pub fn addObject(
     errdefer @compileError("TODO");
 }
 
-pub fn addStatic(self: *World, radius: f64, vertices: []const v.Vec2) !void {
-    const coll = try self.addCollider(radius, vertices);
-    errdefer self.vertices.items.len -= vertices.len;
+pub fn addStatic(self: *World, collider: Collider) !void {
+    const coll = try self.addCollider(collider);
+    errdefer self.vertices.items.len -= collider.verts.len;
 
     try self.static.append(self.allocator, coll);
     errdefer @compileError("TODO");
 }
 
-fn addCollider(self: *World, radius: f64, vertices: []const v.Vec2) !Collider.Packed {
-    try self.vertices.appendSlice(self.allocator, vertices);
+fn addCollider(self: *World, coll: Collider) !Collider.Packed {
+    std.debug.assert(coll.radius > 0); // TODO: Zero radii are not yet supported (GJK would return zero)
+    const vert_start = self.vertices.items.len;
+    try self.vertices.appendSlice(self.allocator, coll.verts);
     return Collider.Packed{
-        .radius = radius,
-        .vert_start = @intCast(u32, self.vertices.items.len - vertices.len),
-        .num_verts = @intCast(u32, vertices.len),
+        .radius = coll.radius,
+        .vert_start = @intCast(u32, vert_start),
+        .num_verts = @intCast(u32, coll.verts.len),
     };
 }
 
@@ -68,8 +69,8 @@ pub fn colliders(self: *const World) ColliderIterator {
 }
 pub const ColliderIterator = struct {
     active: std.MultiArrayList(Object).Slice,
-    static: []Collider.Packed,
-    vertices: []v.Vec2,
+    static: []const Collider.Packed,
+    vertices: []const v.Vec2,
     idx: u32 = 0,
 
     pub fn next(self: *ColliderIterator) ?ColliderInfo {
@@ -135,10 +136,8 @@ pub fn tick(self: World, dt: f64) !void {
 
             const vel = active.items(.vel)[i];
             const move = v.v(movement[i]) * vel;
-            // const move_mag2i = 1.0 / v.dot(move, move);
-            // std.debug.print("{d} {d} {d}\n", .{ move, vel, movement[i] });
 
-            var min_dot: f64 = -1;
+            var min_fac: f64 = 1;
 
             // TODO: Collide with active objects
 
@@ -151,22 +150,30 @@ pub fn tick(self: World, dt: f64) !void {
                     .collider = collider.reify(self.vertices.items),
                 });
 
-                const mag2 = v.dot(norm, norm);
-                const dot = v.dot(norm, move) / mag2;
-                min_dot = @minimum(dot, min_dot);
+                // Account for radii
+                const r = info.collider.radius + collider.radius;
+                // This is highly reduced and simplified math that offsets the collided face outwards by
+                // the combined radii, then finds the intersection of the movement vector with that line
+                const k = (r * v.mag(norm) - v.mag2(norm)) / v.dot(norm, move);
 
-                if (dot < -1 and mag2 <= self.slop * self.slop) {
-                    collided = true;
-                    try collisions.append(.{
-                        .norm = norm,
-                        .obj = @intCast(u32, i),
-                    });
+                if (k >= 0) {
+                    if (k < min_fac) {
+                        min_fac = k;
+                    }
+
+                    if (k * v.mag2(move) <= self.slop * self.slop) {
+                        collided = true;
+                        try collisions.append(.{
+                            .norm = norm,
+                            .obj = @intCast(u32, i),
+                        });
+                    }
                 }
             }
 
             // Advance movement if no collision
             if (!collided) {
-                const move_fac = 0.95 / -min_dot;
+                const move_fac = 0.95 * min_fac;
                 const move_vec = move * v.v(move_fac);
                 active.items(.pos)[i] += move_vec;
                 movement[i] *= 1 - move_fac;
@@ -194,6 +201,7 @@ const CollisionResult = struct {
     obj: u32,
 };
 
+/// Check collision between two colliders. Does not account for radii.
 fn collide(a: CollisionInfo, b: CollisionInfo) v.Vec2 {
     const S = struct {
         a: CollisionInfo,
@@ -231,10 +239,11 @@ pub const Object = struct {
 };
 
 pub const Collider = struct {
-    radius: f64 = 0.0,
-    verts: []v.Vec2 = &.{},
+    radius: f64 = 0.01,
+    verts: []const v.Vec2 = &.{},
 
-    /// Returns the furthest vertex in direction d
+    /// Returns the furthest vertex in direction d.
+    /// Does not account for radius.
     fn support(self: Collider, d: v.Vec2) v.Vec2 {
 
         // Start by sampling a few points
@@ -246,8 +255,7 @@ pub const Collider = struct {
         // Improve the guess
         while (supp.climb(self.verts, d)) {}
 
-        // OPTIM: might be faster to branch if radius is 0
-        return self.verts[supp.idx] + v.normalize(d) * v.v(self.radius);
+        return self.verts[supp.idx];
     }
 
     const Support = struct {
@@ -292,7 +300,7 @@ pub const Collider = struct {
         vert_start: u32,
         num_verts: u32,
 
-        pub fn reify(self: Packed, verts: []v.Vec2) Collider {
+        pub fn reify(self: Packed, verts: []const v.Vec2) Collider {
             return .{
                 .radius = self.radius,
                 .verts = verts[self.vert_start .. self.vert_start + self.num_verts],

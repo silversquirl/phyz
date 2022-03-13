@@ -17,14 +17,19 @@ pub inline fn dot(a: Vec2, b: Vec2) f64 {
     return @reduce(.Add, a * b);
 }
 
-/// Find 1/|a|
-pub inline fn invMag(a: Vec2) f64 {
-    return 1 / @sqrt(dot(a, a));
+/// Find |a|^2
+pub inline fn mag2(a: Vec2) f64 {
+    return dot(a, a);
+}
+
+/// Find |a|
+pub inline fn mag(a: Vec2) f64 {
+    return @sqrt(mag2(a));
 }
 
 /// Normalize a vector
 pub inline fn normalize(a: Vec2) Vec2 {
-    return a * v(invMag(a));
+    return a * v(1 / mag(a));
 }
 
 /// (x, y) -> (-y, x)
@@ -38,11 +43,8 @@ pub inline fn conj(a: Vec2) Vec2 {
 ///  - ((a x b) x a) is perpendicular to a, pointing towards b
 ///  - ((b x a) x a) is perpendicular to a, pointing away from  b
 pub inline fn tripleCross(a: Vec2, b: Vec2, c: Vec2) Vec2 {
-    const k = a * @shuffle(f64, b, b, [2]i32{ 1, 0 });
-    return .{
-        c[1] * (k[1] - k[0]),
-        c[0] * (k[0] - k[1]),
-    };
+    const k = a[0] * b[1] - a[1] * b[0];
+    return .{ c[1] * -k, c[0] * k };
 }
 
 /// Rotate vector a by rotating the vector (1, 0) to vector b
