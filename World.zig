@@ -10,7 +10,7 @@ comptime {
 }
 
 allocator: std.mem.Allocator,
-gravity: v.Vec2 = .{ 0, 0 },
+tick_time: f64 = 1.0 / 60.0, // Tick length in seconds
 slop: f64 = 0.1, // Distance to which collision must be accurate
 
 active: std.MultiArrayList(Object) = .{},
@@ -60,7 +60,7 @@ fn addCollider(self: *World, coll: Collider) !Collider.Packed {
     };
 }
 
-pub fn colliders(self: *const World) ColliderIterator {
+pub fn colliders(self: World) ColliderIterator {
     return .{
         .active = self.active.slice(),
         .static = self.static.items,
@@ -102,20 +102,13 @@ pub const ColliderInfo = struct {
     collider: Collider,
 };
 
-pub fn tick(self: World, dt: f64) !void {
+pub fn tick(self: World) !void {
     const active = self.active.slice();
-
-    // Apply drag and gravity
-    for (active.items(.vel)) |*vel| {
-        vel.* =
-            v.v(0.99) * vel.* +
-            v.v(dt) * self.gravity;
-    }
 
     // Init movement amounts for each object
     var movement = try self.allocator.alloc(f64, active.len);
     defer self.allocator.free(movement);
-    std.mem.set(f64, movement, dt);
+    std.mem.set(f64, movement, self.tick_time);
 
     // Init collision list
     var collisions = std.ArrayList(CollisionResult).init(self.allocator);

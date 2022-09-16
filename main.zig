@@ -3,6 +3,7 @@ const gl = @import("zgl");
 const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
+const actuator = @import("actuator.zig");
 const v = @import("v.zig");
 const World = @import("World.zig");
 
@@ -23,11 +24,13 @@ pub fn main() !void {
 
     gl.clearColor(0, 0, 0, 1);
 
-    var world = World{
-        .allocator = allocator,
-        .gravity = .{ 0, 1000 },
-    };
+    var world = World{ .allocator = allocator };
     defer world.deinit();
+
+    var physics = actuator.composite(.{
+        actuator.drag(0.55),
+        actuator.gravity(.{ 0, 1000 }),
+    });
 
     try world.addStatic(.{ .verts = &[_]v.Vec2{
         .{ 100, 500 },
@@ -85,7 +88,8 @@ pub fn main() !void {
             });
         }
 
-        try world.tick(1.0 / 60.0);
+        physics.apply(world);
+        try world.tick();
 
         ctx.endFrame();
 
