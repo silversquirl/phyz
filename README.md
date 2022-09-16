@@ -9,21 +9,25 @@ Goals are simplicity, speed and ease of use, in that order.
 - [ ] Continuous collision detection
 	- [x] Dynamic-Static
 	- [ ] Dynamic-Dynamic
-- [ ] Friction
-- [ ] Bounce
+- [x] Fully customizable collision resolution
 - [ ] Broad phase
 - [ ] Queries
 	- [ ] Nearest object
 	- [ ] Raycast
-- [ ] Intersecting objects
-- [ ] Constraints
+- [ ] Handle intersecting colliders
+- [ ] Collision masking
+- [ ] More interesting actuators
+	- [ ] Forcefields/magnetism
+	- [ ] Constraints
+- [ ] General purpose resolver
+	- [ ] Friction
+	- [ ] Bounce
 
 ## Non-goals
 
 To keep the engine simple and fast, a number of things are purposefully not supported:
 
 - Rotation and angular velocity
-- Forces (trivial to implement in user code)
 - Soft bodies
 - Non-convex colliders (can be approximated using multiple convex colliders)
 - Multiple colliders per object (can be approximated using constraints)
