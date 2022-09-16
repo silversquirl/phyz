@@ -70,7 +70,7 @@ pub fn colliders(self: World) ColliderIterator {
     };
 }
 pub const ColliderIterator = struct {
-    active: std.MultiArrayList(Object).Slice,
+    active: ObjectList,
     static: []const Collider.Packed,
     vertices: []const v.Vec2,
     idx: u32 = 0,
@@ -104,7 +104,7 @@ pub const ColliderInfo = struct {
     collider: Collider,
 };
 
-pub fn tick(self: World) !void {
+pub fn tick(self: World, resolver: anytype) !void {
     const active = self.active.slice();
 
     // Init movement amounts for each object
@@ -139,7 +139,7 @@ pub fn tick(self: World) !void {
             // Collide with static colliders
             // TODO: broad phase
             var collided = false;
-            for (self.static.items) |collider| {
+            for (self.static.items) |collider, static_idx| {
                 const norm = collide(info, .{
                     .pos = .{ 0, 0 },
                     .collider = collider.reify(self.vertices.items),
@@ -161,6 +161,7 @@ pub fn tick(self: World) !void {
                         try collisions.append(.{
                             .norm = norm,
                             .obj = @intCast(u32, i),
+                            .static = @intCast(u32, static_idx),
                         });
                     }
                 }
@@ -184,20 +185,17 @@ pub fn tick(self: World) !void {
         }
 
         //// Resolve collisions
-        for (collisions.items) |coll| {
-            const vel = &active.items(.vel)[coll.obj];
-            // Project velocity onto collided face
-            const axis = v.conj(coll.norm);
-            const p = v.dot(axis, vel.*) / v.dot(axis, axis);
-            // Apply projected velocity to body
-            vel.* = axis * v.v(p);
+        if (collisions.items.len > 0) {
+            std.debug.assert(!done);
+            resolver.resolve(self, active, @as([]const CollisionResult, collisions.items));
+            collisions.clearRetainingCapacity();
         }
-        collisions.clearRetainingCapacity();
     }
 }
-const CollisionResult = struct {
+pub const CollisionResult = struct {
     norm: v.Vec2,
     obj: u32,
+    static: u32,
 };
 
 /// Check collision between two colliders. Does not account for radii.
@@ -235,6 +233,7 @@ pub const Object = struct {
         total: v.Vec2,
     };
 };
+pub const ObjectList = std.MultiArrayList(Object).Slice;
 
 pub const Collider = struct {
     radius: f64 = 0.01,

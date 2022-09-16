@@ -4,6 +4,7 @@ const glfw = @import("glfw");
 const nanovg = @import("nanovg");
 
 const actuator = @import("actuator.zig");
+const resolver = @import("resolver.zig");
 const v = @import("v.zig");
 const World = @import("World.zig");
 
@@ -112,7 +113,7 @@ pub fn main() !void {
         }
 
         physics.apply(world);
-        try world.tick();
+        try world.tick(resolver.bounce(0.9));
 
         ctx.endFrame();
 
