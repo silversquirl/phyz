@@ -85,7 +85,7 @@ pub fn main() !void {
             });
         }
 
-        try world.tick(1 / 60.0);
+        try world.tick(1.0 / 60.0);
 
         ctx.endFrame();
 
