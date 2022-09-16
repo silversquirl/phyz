@@ -35,32 +35,32 @@ pub fn main() !void {
         actuator.gravity(.{ 0, 1000 }),
     });
 
-    try world.addStatic(.{ .verts = &[_]v.Vec2{
+    _ = try world.addStatic(.{ .verts = &[_]v.Vec2{
         .{ 100, 500 },
         .{ 400, 500 },
         .{ 500, 700 },
         .{ 200, 700 },
     } });
-    try world.addStatic(.{ .verts = &[_]v.Vec2{
+    _ = try world.addStatic(.{ .verts = &[_]v.Vec2{
         .{ 1000, 800 },
         .{ 1000, 900 },
         .{ 400, 900 },
         .{ 400, 800 },
     } });
 
-    try world.addObject(.{ 400, 100 }, .{}, .{ .verts = &[_]v.Vec2{
+    _ = try world.addObject(.{ 400, 100 }, .{ .verts = &[_]v.Vec2{
         .{ 0, 0 },
         .{ 100, 0 },
         .{ 50, 90 },
     } });
 
-    try world.addObject(.{ 500, 100 }, .{}, .{ .radius = 50, .verts = &[_]v.Vec2{
+    _ = try world.addObject(.{ 500, 100 }, .{ .radius = 50, .verts = &[_]v.Vec2{
         .{ 0, 90 },
         .{ 50, 0 },
         .{ 100, 90 },
     } });
 
-    try world.addObject(.{ 730, 30 }, .{}, .{ .radius = 30, .verts = &[_]v.Vec2{.{ 0, 0 }} });
+    _ = try world.addObject(.{ 730, 30 }, .{ .radius = 30, .verts = &[_]v.Vec2{.{ 0, 0 }} });
 
     const font = ctx.createFontMem("Aileron", @embedFile("deps/nanovg/examples/Aileron-Regular.otf"), false);
 

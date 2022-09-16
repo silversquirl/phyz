@@ -27,26 +27,28 @@ pub fn deinit(self: *World) void {
 pub fn addObject(
     self: *World,
     pos: v.Vec2,
-    phys: Object.PhysicalProperties,
     collider: Collider,
-) !void {
+) !u32 {
     const coll = try self.addCollider(collider);
     errdefer self.vertices.items.len -= collider.verts.len;
 
     try self.active.append(self.allocator, .{
         .pos = pos,
-        .phys = phys,
         .collider = coll,
     });
     errdefer @compileError("TODO");
+
+    return @intCast(u32, self.active.len) - 1;
 }
 
-pub fn addStatic(self: *World, collider: Collider) !void {
+pub fn addStatic(self: *World, collider: Collider) !u32 {
     const coll = try self.addCollider(collider);
     errdefer self.vertices.items.len -= collider.verts.len;
 
     try self.static.append(self.allocator, coll);
     errdefer @compileError("TODO");
+
+    return @intCast(u32, self.static.items.len) - 1;
 }
 
 fn addCollider(self: *World, coll: Collider) !Collider.Packed {
@@ -216,7 +218,6 @@ const CollisionInfo = struct {
 pub const Object = struct {
     pos: v.Vec2,
     vel: v.Vec2 = v.v(0),
-    phys: PhysicalProperties,
     collider: Collider.Packed,
 
     pub const PhysicalProperties = struct {
