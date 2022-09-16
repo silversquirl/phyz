@@ -19,12 +19,15 @@ pub fn main() !void {
     defer win.destroy();
     try glfw.makeContextCurrent(win);
 
+    win.setKeyCallback(keyCallback);
+
     const ctx = nanovg.Context.createGl3(.{});
     defer ctx.deleteGl3();
 
     gl.clearColor(0, 0, 0, 1);
 
-    var world = World{ .allocator = allocator };
+    const rate = 1.0 / 1.0;
+    var world = World{ .allocator = allocator, .tick_time = rate / 60.0 };
     defer world.deinit();
 
     var physics = actuator.composite(.{
@@ -59,6 +62,9 @@ pub fn main() !void {
 
     try world.addObject(.{ 730, 30 }, .{}, .{ .radius = 30, .verts = &[_]v.Vec2{.{ 0, 0 }} });
 
+    const font = ctx.createFontMem("Aileron", @embedFile("deps/nanovg/examples/Aileron-Regular.otf"), false);
+
+    var frame: usize = 0;
     while (!win.shouldClose()) {
         const size = try win.getSize();
         const fbsize = try win.getFramebufferSize();
@@ -73,19 +79,36 @@ pub fn main() !void {
                 @intToFloat(f32, size.width),
         );
 
-        const colors = [_]u32{
-            0x00ffffff,
-            0xff00ffff,
-            0x00ff00ff,
-            0xff0000ff,
-        };
-        var it = world.colliders();
-        var i: usize = 0;
-        while (it.next()) |c| : (i = (i + 1) % colors.len) {
-            drawCollider(ctx, c.pos, c.collider, switch (c.kind) {
-                .static => 0xeeff0066,
-                .active => colors[i],
-            });
+        {
+            var buf: [128]u8 = undefined;
+            ctx.fontFaceId(font);
+            ctx.fontSize(24);
+            _ = ctx.text(4, 24, try std.fmt.bufPrint(&buf, "{}", .{frame}));
+            frame += 1;
+        }
+
+        {
+            const colors = [_]u32{
+                0x00ffffff,
+                0xff00ffff,
+                0x00ff00ff,
+                0xff0000ff,
+            };
+            var it = world.colliders();
+            var i: usize = 0;
+            while (it.next()) |c| : (i = (i + 1) % colors.len) {
+                drawCollider(ctx, c.pos, c.collider, switch (c.kind) {
+                    .static => 0xeeff0066,
+                    .active => colors[i],
+                });
+            }
+        }
+
+        {
+            const slice = world.active.slice();
+            for (slice.items(.pos)) |pos, i| {
+                drawVector(ctx, pos, slice.items(.vel)[i], 0xffffff80);
+            }
         }
 
         physics.apply(world);
@@ -190,4 +213,19 @@ fn drawVector(ctx: *nanovg.Context, start: v.Vec2, dir: v.Vec2, color: u32) void
     );
     ctx.strokeColor(nanovg.Color.hex(color));
     ctx.stroke();
+}
+
+fn keyCallback(win: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
+    _ = win;
+    _ = scancode;
+    _ = mods;
+
+    switch (key) {
+        .u => switch (action) {
+            .release => glfw.swapInterval(1) catch {},
+            .press => glfw.swapInterval(0) catch {},
+            .repeat => {},
+        },
+        else => {},
+    }
 }
