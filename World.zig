@@ -151,7 +151,7 @@ pub fn tick(self: World) !void {
                 // the combined radii, then finds the intersection of the movement vector with that line
                 const k = (r * v.mag(norm) - v.mag2(norm)) / v.dot(norm, move);
 
-                if (k >= 0) {
+                if (k >= 0 and k <= 1) {
                     if (k < min_fac) {
                         min_fac = k;
                     }
@@ -166,16 +166,20 @@ pub fn tick(self: World) !void {
                 }
             }
 
-            // Advance movement if no collision
-            if (!collided) {
-                const move_fac = 0.95 * min_fac;
+            if (collided) {
+                // We hit something; try again next step
+                done = false;
+            } else {
+                // Advance movement
+                const move_fac = 0.9999 * min_fac;
                 const move_vec = move * v.v(move_fac);
                 active.items(.pos)[i] += move_vec;
                 movement[i] *= 1 - move_fac;
-            }
 
-            if (collided or movement[i] > self.slop) {
-                done = false;
+                if (movement[i] * v.mag2(vel) > self.slop * self.slop) {
+                    // More movement to do
+                    done = false;
+                }
             }
         }
 
