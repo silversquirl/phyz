@@ -5,6 +5,8 @@ const nanovg = @import("nanovg");
 
 const actuator = @import("actuator.zig");
 const resolver = @import("resolver.zig");
+
+const collision = @import("collision.zig");
 const v = @import("v.zig");
 const World = @import("World.zig");
 
@@ -202,7 +204,7 @@ pub fn main() !void {
     }
 }
 
-fn drawCollider(ctx: *nanovg.Context, pos: v.Vec2, c: World.Collider, color: u32) void {
+fn drawCollider(ctx: *nanovg.Context, pos: v.Vec2, c: collision.Collider, color: u32) void {
     var clr = nanovg.Color.hex(color);
     ctx.strokeColor(clr);
     clr.a *= 0.5;

@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const collision = @import("collision.zig");
 const gjk = @import("gjk.zig");
 const v = @import("v.zig");
 const SpatialHash = @import("SpatialHash.zig");
@@ -15,7 +16,7 @@ tick_time: f64 = 1.0 / 60.0, // Tick length in seconds
 slop: f64 = 0.1, // Distance to which collision must be accurate
 
 active: std.MultiArrayList(Object) = .{},
-static: std.ArrayListUnmanaged(Collider.Packed) = .{},
+static: std.ArrayListUnmanaged(PackedCollider) = .{},
 vertices: std.ArrayListUnmanaged(v.Vec2) = .{},
 
 static_hash: SpatialHash = .{},
@@ -32,7 +33,7 @@ pub fn deinit(self: *World) void {
 pub fn addObject(
     self: *World,
     pos: v.Vec2,
-    collider: Collider,
+    collider: collision.Collider,
 ) !u32 {
     const coll = try self.addCollider(collider);
     errdefer self.vertices.items.len -= collider.verts.len;
@@ -46,7 +47,7 @@ pub fn addObject(
     return @intCast(u32, self.active.len) - 1;
 }
 
-pub fn addStatic(self: *World, collider: Collider) !u32 {
+pub fn addStatic(self: *World, collider: collision.Collider) !u32 {
     const coll = try self.addCollider(collider);
     errdefer self.vertices.items.len -= collider.verts.len;
 
@@ -60,11 +61,11 @@ pub fn addStatic(self: *World, collider: Collider) !u32 {
     return id;
 }
 
-fn addCollider(self: *World, coll: Collider) !Collider.Packed {
+fn addCollider(self: *World, coll: collision.Collider) !PackedCollider {
     std.debug.assert(coll.radius > 0); // TODO: Zero radii are not yet supported (GJK would return zero)
     const vert_start = self.vertices.items.len;
     try self.vertices.appendSlice(self.allocator, coll.verts);
-    return Collider.Packed{
+    return .{
         .radius = coll.radius,
         .vert_start = @intCast(u32, vert_start),
         .num_verts = @intCast(u32, coll.verts.len),
@@ -81,7 +82,7 @@ pub fn colliders(self: World) ColliderIterator {
 }
 pub const ColliderIterator = struct {
     active: ObjectList,
-    static: []const Collider.Packed,
+    static: []const PackedCollider,
     vertices: []const v.Vec2,
     idx: u32 = 0,
 
@@ -111,7 +112,7 @@ pub const ColliderIterator = struct {
 pub const ColliderInfo = struct {
     kind: enum { active, static },
     pos: v.Vec2,
-    collider: Collider,
+    collider: collision.Collider,
 };
 
 pub fn closestStatic(self: World, pos: v.Vec2, max_distance: f64) ?SearchResult {
@@ -120,12 +121,9 @@ pub fn closestStatic(self: World, pos: v.Vec2, max_distance: f64) ?SearchResult 
 const SearchClosest = struct {
     pub const Context = void;
 
-    /// Return closest point on collider. Does not account for radius
-    pub fn findPoint(origin: v.Vec2, coll: Collider, _: void) ?v.Vec2 {
-        return origin + gjk.minimumPoint(OffsetCollider{
-            .pos = -origin,
-            .collider = coll,
-        });
+    /// Return closest point on collider
+    pub fn findPoint(origin: v.Vec2, coll: collision.Collider, _: void) ?v.Vec2 {
+        return collision.closestPoint(origin, coll);
     }
 
     pub const BinIterator = struct {
@@ -215,21 +213,18 @@ pub fn searchStatic(
                         continue;
                     }
 
-                    const vertex = strategy.findPoint(
+                    const point = strategy.findPoint(
                         origin,
                         coll.reify(self.vertices.items),
                         context,
                     ) orelse continue;
 
-                    if (v.mag2(vertex - origin) < coll.radius * coll.radius) {
+                    if (@reduce(.And, point == origin)) {
                         return .{
                             .idx = idx,
                             .point = origin,
                         };
                     }
-
-                    // Adjust for radius
-                    const point = vertex + v.v(coll.radius) * v.normalize(origin - vertex);
 
                     const dist2 = v.mag2(point - origin);
                     if (min_d > dist2) {
@@ -277,7 +272,7 @@ pub fn tick(self: World, resolver: anytype) !void {
         // OPTIM: only iterate objects that haven't converged
         for (active.items(.pos)) |pos, i| {
             const coll = active.items(.collider)[i];
-            const info = OffsetCollider{
+            const info = collision.OffsetCollider{
                 .pos = pos,
                 .collider = coll.reify(self.vertices.items),
             };
@@ -299,7 +294,7 @@ pub fn tick(self: World, resolver: anytype) !void {
                     continue;
                 }
 
-                const norm = gjk.minimumPoint(MinkowskiDifference{
+                const norm = gjk.minimumPoint(collision.MinkowskiDifference{
                     .a = info,
                     .b = .{
                         .pos = .{ 0, 0 },
@@ -369,28 +364,10 @@ pub const CollisionResult = struct {
     };
 };
 
-const OffsetCollider = struct {
-    pos: v.Vec2,
-    collider: Collider,
-
-    pub fn support(self: OffsetCollider, d: v.Vec2) v.Vec2 {
-        return self.collider.support(d) + self.pos;
-    }
-};
-
-const MinkowskiDifference = struct {
-    a: OffsetCollider,
-    b: OffsetCollider,
-
-    pub fn support(self: MinkowskiDifference, d: v.Vec2) v.Vec2 {
-        return self.a.support(d) - self.b.support(-d);
-    }
-};
-
 pub const Object = struct {
     pos: v.Vec2,
     vel: v.Vec2 = v.v(0),
-    collider: Collider.Packed,
+    collider: PackedCollider,
 
     pub const PhysicalProperties = struct {
         mass: f64 = 1.0,
@@ -405,91 +382,16 @@ pub const Object = struct {
 };
 pub const ObjectList = std.MultiArrayList(Object).Slice;
 
-pub const Collider = struct {
-    radius: f64 = 0.01,
-    verts: []const v.Vec2 = &.{},
+pub const PackedCollider = struct {
+    radius: f64,
+    vert_start: u32,
+    num_verts: u32,
+    box: v.Box,
 
-    pub fn box(self: Collider) v.Box {
-        var min = v.v(std.math.inf(f64));
-        var max = -min;
-        for (self.verts) |vert| {
-            min = @minimum(min, vert);
-            max = @maximum(max, vert);
-        }
-
-        // Expand by radius in every direction
-        min -= v.v(self.radius);
-        max += v.v(self.radius);
-
-        std.debug.assert(@reduce(.And, min < max));
-
-        return .{ .min = min, .max = max };
+    pub fn reify(self: PackedCollider, verts: []const v.Vec2) collision.Collider {
+        return .{
+            .radius = self.radius,
+            .verts = verts[self.vert_start .. self.vert_start + self.num_verts],
+        };
     }
-
-    /// Returns the furthest vertex in direction d.
-    /// Does not account for radius.
-    pub fn support(self: Collider, d: v.Vec2) v.Vec2 {
-
-        // Start by sampling a few points
-        var supp = Support.init(self.verts, 0, d);
-        _ = supp.improve(self.verts, self.verts.len / 4, d);
-        _ = supp.improve(self.verts, self.verts.len / 2, d);
-        _ = supp.improve(self.verts, 3 * self.verts.len / 4, d);
-
-        // Improve the guess
-        while (supp.climb(self.verts, d)) {}
-
-        return self.verts[supp.idx];
-    }
-
-    const Support = struct {
-        idx: usize,
-        dot: f64,
-
-        fn init(verts: []const v.Vec2, idx: usize, d: v.Vec2) Support {
-            return .{
-                .idx = idx,
-                .dot = v.dot(d, verts[idx]),
-            };
-        }
-
-        fn improve(supp: *Support, verts: []const v.Vec2, idx: usize, d: v.Vec2) bool {
-            const new = Support.init(verts, idx, d);
-            if (new.dot > supp.dot) {
-                supp.* = new;
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-        fn climb(supp: *Support, verts: []const v.Vec2, d: v.Vec2) bool {
-            const li = if (supp.idx + 1 >= verts.len)
-                0
-            else
-                supp.idx + 1;
-            const ri = if (supp.idx == 0)
-                verts.len - 1
-            else
-                supp.idx - 1;
-
-            const l_good = supp.improve(verts, li, d);
-            const r_good = supp.improve(verts, ri, d);
-            return l_good or r_good;
-        }
-    };
-
-    pub const Packed = struct {
-        radius: f64,
-        vert_start: u32,
-        num_verts: u32,
-        box: v.Box,
-
-        pub fn reify(self: Packed, verts: []const v.Vec2) Collider {
-            return .{
-                .radius = self.radius,
-                .verts = verts[self.vert_start .. self.vert_start + self.num_verts],
-            };
-        }
-    };
 };
