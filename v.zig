@@ -5,7 +5,7 @@ comptime {
     @setFloatMode(.Optimized);
 }
 
-pub const Vec2 = std.meta.Vector(2, f64);
+pub const Vec2 = @Vector(2, f64);
 
 /// Turn a scalar into a vector
 pub inline fn v(s: f64) Vec2 {

@@ -49,6 +49,18 @@ pub fn main() !void {
         .{ 400, 800 },
     } });
 
+    _ = try world.addStatic(.{ .verts = &.{
+        .{ 170, 150 },
+        .{ 180, 180 },
+        .{ 150, 170 },
+    }, .radius = 30 });
+
+    _ = try world.addStatic(.{ .verts = &.{
+        .{ 270, 350 },
+        .{ 280, 280 },
+        .{ 250, 270 },
+    } });
+
     _ = try world.addObject(.{ 400, 100 }, .{ .verts = &[_]v.Vec2{
         .{ 0, 0 },
         .{ 100, 0 },
@@ -102,6 +114,16 @@ pub fn main() !void {
                     .static => 0xeeff0066,
                     .active => colors[i],
                 });
+
+                const box = World.colliderBox(c.collider, v.v(0)).add(c.pos);
+                ctx.beginPath();
+                ctx.rect(
+                    @floatCast(f32, box.min[0]),
+                    @floatCast(f32, box.min[1]),
+                    @floatCast(f32, box.max[0] - box.min[0]),
+                    @floatCast(f32, box.max[1] - box.min[1]),
+                );
+                ctx.stroke();
             }
         }
 
@@ -110,6 +132,67 @@ pub fn main() !void {
             for (slice.items(.pos)) |pos, i| {
                 drawVector(ctx, pos, slice.items(.vel)[i], 0xffffff80);
             }
+        }
+
+        {
+            ctx.strokeColor(nanovg.Color.hex(0xffffff20));
+            ctx.fillColor(nanovg.Color.hex(0xffffff10));
+
+            const bin_size = @floatCast(f32, world.static_hash.bin_size);
+            const w = (size.width - 1) / @floatToInt(u32, bin_size) + 1;
+            const h = (size.height - 1) / @floatToInt(u32, bin_size) + 1;
+
+            var y: u32 = 0;
+            while (y < h) : (y += 1) {
+                var x: u32 = 0;
+                while (x < w) : (x += 1) {
+                    ctx.beginPath();
+                    ctx.rect(
+                        @intToFloat(f32, x) * bin_size,
+                        @intToFloat(f32, y) * bin_size,
+                        bin_size,
+                        bin_size,
+                    );
+                    ctx.stroke();
+
+                    const pos = v.Vec2{
+                        @intToFloat(f64, x) * bin_size,
+                        @intToFloat(f64, y) * bin_size,
+                    };
+                    var it = world.static_hash.get(.{
+                        .min = pos,
+                        .max = pos + v.v(world.static_hash.bin_size),
+                    });
+                    if (it.next() != null) {
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        {
+            const cursor = try win.getCursorPos();
+            const pos = v.Vec2{ cursor.xpos, cursor.ypos };
+            var it = world.static_hash.get(.{ .min = pos, .max = pos + v.v(50) });
+            var count: usize = 0;
+            while (it.next()) |_| {
+                count += 1;
+            }
+
+            ctx.strokeColor(nanovg.Color.hex(0x00ffff80));
+            ctx.beginPath();
+            ctx.rect(@floatCast(f32, cursor.xpos), @floatCast(f32, cursor.ypos), 50, 50);
+            ctx.stroke();
+
+            ctx.fillColor(nanovg.Color.hex(0xffffffff));
+            ctx.fontFaceId(font);
+            ctx.fontSize(18);
+            var buf: [128]u8 = undefined;
+            _ = ctx.text(
+                @floatCast(f32, cursor.xpos) - 10,
+                @floatCast(f32, cursor.ypos) - 5,
+                try std.fmt.bufPrint(&buf, "{}", .{count}),
+            );
         }
 
         physics.apply(world);

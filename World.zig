@@ -2,6 +2,7 @@ const std = @import("std");
 
 const gjk = @import("gjk.zig");
 const v = @import("v.zig");
+const SpatialHash = @import("SpatialHash.zig");
 
 const World = @This();
 
@@ -17,11 +18,15 @@ active: std.MultiArrayList(Object) = .{},
 static: std.ArrayListUnmanaged(Collider.Packed) = .{},
 vertices: std.ArrayListUnmanaged(v.Vec2) = .{},
 
+static_hash: SpatialHash = .{},
+
 /// Free all memory associated with the world
 pub fn deinit(self: *World) void {
     self.active.deinit(self.allocator);
     self.static.deinit(self.allocator);
     self.vertices.deinit(self.allocator);
+
+    self.static_hash.deinit(self.allocator);
 }
 
 pub fn addObject(
@@ -45,10 +50,36 @@ pub fn addStatic(self: *World, collider: Collider) !u32 {
     const coll = try self.addCollider(collider);
     errdefer self.vertices.items.len -= collider.verts.len;
 
+    const id = @intCast(u32, self.static.items.len);
     try self.static.append(self.allocator, coll);
+    errdefer _ = self.static.pop();
+
+    const box = colliderBox(collider, v.v(0));
+    try self.static_hash.add(self.allocator, box, id);
     errdefer @compileError("TODO");
 
-    return @intCast(u32, self.static.items.len) - 1;
+    return id;
+}
+
+pub fn colliderBox(coll: Collider, expand: v.Vec2) SpatialHash.Box {
+    var min = v.v(std.math.inf(f64));
+    var max = -min;
+    for (coll.verts) |vert| {
+        min = @minimum(min, vert);
+        max = @maximum(max, vert);
+    }
+
+    // Expand by radius in every direction
+    min -= v.v(coll.radius);
+    max += v.v(coll.radius);
+
+    // Expand in direction of expand vector
+    min += @minimum(expand, v.v(0));
+    max += @maximum(expand, v.v(0));
+
+    std.debug.assert(@reduce(.And, min < max));
+
+    return .{ .min = min, .max = max };
 }
 
 fn addCollider(self: *World, coll: Collider) !Collider.Packed {
@@ -113,7 +144,12 @@ pub fn tick(self: World, resolver: anytype) !void {
     std.mem.set(f64, movement, self.tick_time);
 
     // Init collision list
-    var collisions = std.ArrayList(CollisionResult).init(self.allocator);
+    var collisions = std.ArrayHashMap(
+        CollisionResult,
+        void,
+        CollisionResult.Context,
+        false,
+    ).init(self.allocator);
     defer collisions.deinit();
 
     var done = false;
@@ -123,23 +159,25 @@ pub fn tick(self: World, resolver: anytype) !void {
         //// Compute collisions and movement
         // OPTIM: only iterate objects that haven't converged
         for (active.items(.pos)) |pos, i| {
+            const coll = active.items(.collider)[i].reify(self.vertices.items);
             const info = CollisionInfo{
                 .pos = pos,
-                .collider = active.items(.collider)[i]
-                    .reify(self.vertices.items),
+                .collider = coll,
             };
 
             const vel = active.items(.vel)[i];
             const move = v.v(movement[i]) * vel;
+            const box = colliderBox(coll, move).add(pos);
 
             var min_fac: f64 = 1;
 
             // TODO: Collide with active objects
 
             // Collide with static colliders
-            // TODO: broad phase
+            var it = self.static_hash.get(box);
             var collided = false;
-            for (self.static.items) |collider, static_idx| {
+            while (it.next()) |static_id| {
+                const collider = self.static.items[static_id];
                 const norm = collide(info, .{
                     .pos = .{ 0, 0 },
                     .collider = collider.reify(self.vertices.items),
@@ -158,11 +196,11 @@ pub fn tick(self: World, resolver: anytype) !void {
 
                     if (k * v.mag2(move) <= self.slop * self.slop) {
                         collided = true;
-                        try collisions.append(.{
+                        try collisions.put(.{
                             .norm = norm,
                             .obj = @intCast(u32, i),
-                            .static = @intCast(u32, static_idx),
-                        });
+                            .static = @intCast(u32, static_id),
+                        }, {});
                     }
                 }
             }
@@ -185,9 +223,9 @@ pub fn tick(self: World, resolver: anytype) !void {
         }
 
         //// Resolve collisions
-        if (collisions.items.len > 0) {
+        if (collisions.count() > 0) {
             std.debug.assert(!done);
-            resolver.resolve(self, active, @as([]const CollisionResult, collisions.items));
+            resolver.resolve(self, active, @as([]const CollisionResult, collisions.keys()));
             collisions.clearRetainingCapacity();
         }
     }
@@ -196,6 +234,15 @@ pub const CollisionResult = struct {
     norm: v.Vec2,
     obj: u32,
     static: u32,
+
+    const Context = struct {
+        pub fn eql(_: Context, a: CollisionResult, b: CollisionResult, _: usize) bool {
+            return a.static == b.static;
+        }
+        pub fn hash(_: Context, r: CollisionResult) u32 {
+            return @truncate(u32, std.hash.Wyhash.hash(0, std.mem.asBytes(&r.static)));
+        }
+    };
 };
 
 /// Check collision between two colliders. Does not account for radii.
