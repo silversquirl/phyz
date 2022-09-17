@@ -4,13 +4,10 @@ const v = @import("v.zig");
 // TODO: return normalized vector and magnitude, to allow determining normal even in the case of collisions
 
 /// Returns the closest point to the origin.
-pub fn minimumPoint(
-    shape: anytype,
-    comptime support: fn (@TypeOf(shape), d: v.Vec2) v.Vec2,
-) v.Vec2 {
+pub fn minimumPoint(shape: anytype) v.Vec2 {
     var s_buf: [3]v.Vec2 = undefined;
     var s: []v.Vec2 = s_buf[0..1];
-    s[0] = support(shape, .{ 1, 0 });
+    s[0] = shape.support(.{ 1, 0 });
     var i: usize = 0;
     while (true) {
         if (@import("builtin").mode == .Debug) {
@@ -32,7 +29,7 @@ pub fn minimumPoint(
         if (@reduce(.And, normal == v.v(0))) {
             return v.v(0);
         }
-        const new_point = support(shape, normal);
+        const new_point = shape.support(normal);
 
         // std.debug.print("{d} {d} {d}\n", .{ new_point, s, normal });
 

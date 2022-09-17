@@ -61,6 +61,19 @@ pub fn main() !void {
         .{ 250, 270 },
     } });
 
+    _ = try world.addStatic(.{ .verts = &.{
+        .{ 900, 200 },
+        .{ 900, 300 },
+        .{ 800, 300 },
+        .{ 800, 200 },
+    } });
+    _ = try world.addStatic(.{ .radius = 100, .verts = &.{
+        .{ 1300, 200 },
+        .{ 1300, 300 },
+        .{ 1200, 300 },
+        .{ 1200, 200 },
+    } });
+
     _ = try world.addObject(.{ 400, 100 }, .{ .verts = &[_]v.Vec2{
         .{ 0, 0 },
         .{ 100, 0 },
@@ -173,29 +186,10 @@ pub fn main() !void {
         {
             const cursor = try win.getCursorPos();
             const pos = v.Vec2{ cursor.xpos, cursor.ypos };
-            const cursor_box = v.Box{ .min = pos, .max = pos + v.v(50) };
-            var it = world.static_hash.get(cursor_box);
-            var count: usize = 0;
-            while (it.next()) |id| {
-                if (cursor_box.collides(world.static.items[id].box)) {
-                    count += 1;
-                }
+
+            if (world.closestStatic(pos, std.math.inf(f64))) |closest| {
+                drawPoint(ctx, closest.point, 0x00ffffff);
             }
-
-            ctx.strokeColor(nanovg.Color.hex(0x00ffff80));
-            ctx.beginPath();
-            ctx.rect(@floatCast(f32, cursor.xpos), @floatCast(f32, cursor.ypos), 50, 50);
-            ctx.stroke();
-
-            ctx.fillColor(nanovg.Color.hex(0xffffffff));
-            ctx.fontFaceId(font);
-            ctx.fontSize(18);
-            var buf: [128]u8 = undefined;
-            _ = ctx.text(
-                @floatCast(f32, cursor.xpos) - 10,
-                @floatCast(f32, cursor.ypos) - 5,
-                try std.fmt.bufPrint(&buf, "{}", .{count}),
-            );
         }
 
         physics.apply(world);

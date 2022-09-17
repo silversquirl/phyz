@@ -114,6 +114,119 @@ pub const ColliderInfo = struct {
     collider: Collider,
 };
 
+pub fn closestStatic(self: World, pos: v.Vec2, max_distance: f64) ?ClosestPoint {
+    if (self.static.items.len == 0) {
+        return null;
+    }
+
+    // OPTIM: iterate all statics if there are only a few
+    // This may be significantly faster in some situations because the full alg is O(n) on distance
+
+    const center_pos = self.static_hash.posToBin(pos);
+
+    var min_d: f64 = max_distance * max_distance;
+    var min_p: ?ClosestPoint = null;
+
+    var found_closer_bin = true;
+    var radius: u63 = 0;
+    while (found_closer_bin) : (radius += 1) {
+        found_closer_bin = false;
+
+        var it = BoxOutlineIterator{
+            .center = center_pos,
+            .radius = radius,
+        };
+
+        while (it.next()) |bin_pos| {
+            if (min_d <= self.static_hash.binBox(bin_pos).distanceSquared(pos)) {
+                continue;
+            }
+            found_closer_bin = true;
+
+            if (self.static_hash.getBin(bin_pos)) |bin| {
+                for (bin) |idx| {
+                    const coll = self.static.items[idx];
+                    if (min_d <= coll.box.distanceSquared(pos)) {
+                        continue;
+                    }
+
+                    const vertex = gjk.minimumPoint(OffsetCollider{
+                        .pos = -pos,
+                        .collider = coll.reify(self.vertices.items),
+                    });
+                    if (v.mag2(vertex) < coll.radius * coll.radius) {
+                        return .{
+                            .idx = idx,
+                            .point = pos,
+                        };
+                    }
+
+                    // Adjust for radius
+                    const point = vertex + v.v(coll.radius) * v.normalize(-vertex);
+
+                    const dist2 = v.mag2(point);
+                    if (min_d > dist2) {
+                        min_d = dist2;
+                        min_p = .{
+                            .idx = idx,
+                            .point = pos + point,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    std.debug.assert(std.math.isFinite(min_d));
+    return min_p;
+}
+
+pub const ClosestPoint = struct {
+    idx: u32,
+    point: v.Vec2,
+};
+
+const BoxOutlineIterator = struct {
+    center: [2]i64,
+    radius: u63,
+    index: u64 = 0,
+
+    pub fn next(self: *BoxOutlineIterator) ?[2]i64 {
+        if (self.radius == 0) {
+            if (self.index == 0) {
+                self.index += 1;
+                return self.center;
+            } else {
+                return null;
+            }
+        }
+
+        if (self.index >> 2 > self.radius * 2) {
+            return null;
+        }
+
+        const idx = @intCast(u62, self.index >> 2);
+        const quad = @truncate(u4, self.index);
+        self.index += 1;
+
+        var pos = [2]i64{
+            self.radius,
+            self.radius,
+        };
+
+        pos[quad & 1] -= idx;
+        if (quad & 2 != 0) {
+            pos[0] *= -1;
+            pos[1] *= -1;
+        }
+
+        pos[0] += self.center[0];
+        pos[1] += self.center[1];
+
+        return pos;
+    }
+};
+
 pub fn tick(self: World, resolver: anytype) !void {
     const active = self.active.slice();
 
@@ -139,7 +252,7 @@ pub fn tick(self: World, resolver: anytype) !void {
         // OPTIM: only iterate objects that haven't converged
         for (active.items(.pos)) |pos, i| {
             const coll = active.items(.collider)[i];
-            const info = CollisionInfo{
+            const info = OffsetCollider{
                 .pos = pos,
                 .collider = coll.reify(self.vertices.items),
             };
@@ -161,9 +274,12 @@ pub fn tick(self: World, resolver: anytype) !void {
                     continue;
                 }
 
-                const norm = collide(info, .{
-                    .pos = .{ 0, 0 },
-                    .collider = collider.reify(self.vertices.items),
+                const norm = gjk.minimumPoint(MinkowskiDifference{
+                    .a = info,
+                    .b = .{
+                        .pos = .{ 0, 0 },
+                        .collider = collider.reify(self.vertices.items),
+                    },
                 });
 
                 // Account for radii
@@ -228,23 +344,22 @@ pub const CollisionResult = struct {
     };
 };
 
-/// Check collision between two colliders. Does not account for radii.
-fn collide(a: CollisionInfo, b: CollisionInfo) v.Vec2 {
-    const S = struct {
-        a: CollisionInfo,
-        b: CollisionInfo,
-        fn support(pair: @This(), d: v.Vec2) v.Vec2 {
-            // Minkowski difference
-            const as = pair.a.collider.support(d) + pair.a.pos;
-            const bs = pair.b.collider.support(-d) + pair.b.pos;
-            return as - bs;
-        }
-    };
-    return gjk.minimumPoint(S{ .a = a, .b = b }, S.support);
-}
-const CollisionInfo = struct {
+const OffsetCollider = struct {
     pos: v.Vec2,
     collider: Collider,
+
+    pub fn support(self: OffsetCollider, d: v.Vec2) v.Vec2 {
+        return self.collider.support(d) + self.pos;
+    }
+};
+
+const MinkowskiDifference = struct {
+    a: OffsetCollider,
+    b: OffsetCollider,
+
+    pub fn support(self: MinkowskiDifference, d: v.Vec2) v.Vec2 {
+        return self.a.support(d) - self.b.support(-d);
+    }
 };
 
 pub const Object = struct {
@@ -288,7 +403,7 @@ pub const Collider = struct {
 
     /// Returns the furthest vertex in direction d.
     /// Does not account for radius.
-    fn support(self: Collider, d: v.Vec2) v.Vec2 {
+    pub fn support(self: Collider, d: v.Vec2) v.Vec2 {
 
         // Start by sampling a few points
         var supp = Support.init(self.verts, 0, d);

@@ -11,6 +11,7 @@ pub const Box = struct {
     min: Vec2,
     max: Vec2,
 
+    /// Return a new box, moved in the direction of vec
     pub fn add(self: Box, vec: Vec2) Box {
         return .{
             .min = self.min + vec,
@@ -18,6 +19,7 @@ pub const Box = struct {
         };
     }
 
+    /// Return a new box, expanded in the direction of vec
     pub fn expand(self: Box, vec: Vec2) Box {
         // Expand in direction of vector
         return .{
@@ -26,8 +28,19 @@ pub const Box = struct {
         };
     }
 
+    /// Check if two boxes touch
     pub fn collides(a: Box, b: Box) bool {
         return !(@reduce(.Or, a.max < b.min) or @reduce(.Or, b.max < a.min));
+    }
+
+    /// Clamp a point to inside the box
+    pub fn clamp(self: Box, point: Vec2) Vec2 {
+        return @maximum(self.min, @minimum(self.max, point));
+    }
+
+    /// Return the squared distance from a point to any point in the box
+    pub fn distanceSquared(self: Box, point: Vec2) f64 {
+        return mag2(point - self.clamp(point));
     }
 };
 

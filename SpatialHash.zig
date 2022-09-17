@@ -77,11 +77,41 @@ pub const Iterator = struct {
     }
 };
 
+pub fn posToBin(self: SpatialHash, pos: v.Vec2) [2]i64 {
+    const qpos = @floor(pos / v.v(self.bin_size));
+    return .{
+        @floatToInt(i64, qpos[0]),
+        @floatToInt(i64, qpos[1]),
+    };
+}
+pub fn binBox(self: SpatialHash, bin_pos: [2]i64) v.Box {
+    const pos = v.Vec2{
+        @intToFloat(f64, bin_pos[0]),
+        @intToFloat(f64, bin_pos[1]),
+    };
+    return .{
+        .min = v.v(self.bin_size) * pos,
+        .max = v.v(self.bin_size) * (pos + v.v(1)),
+    };
+}
+
+pub fn getBin(self: SpatialHash, bin_pos: [2]i64) ?[]const u32 {
+    if (self.map.get(hashPos(bin_pos))) |bin| {
+        return bin.items;
+    } else {
+        return null;
+    }
+}
+
 pub fn deinit(self: *SpatialHash, allocator: std.mem.Allocator) void {
     for (self.map.values()) |*bin| {
         bin.deinit(allocator);
     }
     self.map.deinit(allocator);
+}
+
+fn hashPos(pos: [2]i64) u32 {
+    return @truncate(u32, std.hash.Wyhash.hash(0, std.mem.asBytes(&pos)));
 }
 
 const BoxIterator = struct {
@@ -123,10 +153,6 @@ const BoxIterator = struct {
         }
 
         return result;
-    }
-
-    fn hashPos(pos: [2]i64) u32 {
-        return @truncate(u32, std.hash.Wyhash.hash(0, std.mem.asBytes(&pos)));
     }
 };
 
