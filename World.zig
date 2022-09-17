@@ -114,62 +114,129 @@ pub const ColliderInfo = struct {
     collider: Collider,
 };
 
-pub fn closestStatic(self: World, pos: v.Vec2, max_distance: f64) ?ClosestPoint {
+pub fn closestStatic(self: World, pos: v.Vec2, max_distance: f64) ?SearchResult {
+    return self.searchStatic(SearchClosest, pos, max_distance, {});
+}
+const SearchClosest = struct {
+    pub const Context = void;
+
+    /// Return closest point on collider. Does not account for radius
+    pub fn findPoint(origin: v.Vec2, coll: Collider, _: void) ?v.Vec2 {
+        return origin + gjk.minimumPoint(OffsetCollider{
+            .pos = -origin,
+            .collider = coll,
+        });
+    }
+
+    pub const BinIterator = struct {
+        center: [2]i64,
+        radius: u63,
+        context: void,
+        index: u64 = 0,
+
+        pub fn next(self: *BinIterator) ?[2]i64 {
+            if (self.radius == 0) {
+                if (self.index == 0) {
+                    self.index += 1;
+                    return self.center;
+                } else {
+                    return null;
+                }
+            }
+
+            if (self.index >> 2 > self.radius * 2) {
+                return null;
+            }
+
+            const idx = @intCast(u62, self.index >> 2);
+            const quad = @truncate(u4, self.index);
+            self.index += 1;
+
+            var pos = [2]i64{
+                self.radius,
+                self.radius,
+            };
+
+            pos[quad & 1] -= idx;
+            if (quad & 2 != 0) {
+                pos[0] *= -1;
+                pos[1] *= -1;
+            }
+
+            pos[0] += self.center[0];
+            pos[1] += self.center[1];
+
+            return pos;
+        }
+    };
+};
+
+pub fn searchStatic(
+    self: World,
+    comptime strategy: type,
+    origin: v.Vec2,
+    max_distance: f64,
+    context: strategy.Context,
+) ?SearchResult {
     if (self.static.items.len == 0) {
         return null;
     }
 
     // OPTIM: iterate all statics if there are only a few
-    // This may be significantly faster in some situations because the full alg is O(n) on distance
+    //        This may be significantly faster in some situations because the full alg is O(n) on distance
 
-    const center_pos = self.static_hash.posToBin(pos);
+    const origin_bin = self.static_hash.posToBin(origin);
 
     var min_d: f64 = max_distance * max_distance;
-    var min_p: ?ClosestPoint = null;
+    var min_p: ?SearchResult = null;
 
     var found_closer_bin = true;
     var radius: u63 = 0;
     while (found_closer_bin) : (radius += 1) {
         found_closer_bin = false;
 
-        var it = BoxOutlineIterator{
-            .center = center_pos,
+        var it = strategy.BinIterator{
+            .center = origin_bin,
             .radius = radius,
+            .context = context,
         };
 
         while (it.next()) |bin_pos| {
-            if (min_d <= self.static_hash.binBox(bin_pos).distanceSquared(pos)) {
+            if (min_d <= self.static_hash.binBox(bin_pos).distanceSquared(origin)) {
                 continue;
+            } else {
+                found_closer_bin = true;
             }
-            found_closer_bin = true;
 
             if (self.static_hash.getBin(bin_pos)) |bin| {
                 for (bin) |idx| {
                     const coll = self.static.items[idx];
-                    if (min_d <= coll.box.distanceSquared(pos)) {
+                    if (min_d <= coll.box.distanceSquared(origin)) {
                         continue;
                     }
 
-                    const vertex = gjk.minimumPoint(OffsetCollider{
-                        .pos = -pos,
-                        .collider = coll.reify(self.vertices.items),
-                    });
-                    if (v.mag2(vertex) < coll.radius * coll.radius) {
+                    const vertex = strategy.findPoint(
+                        origin,
+                        coll.reify(self.vertices.items),
+                        context,
+                    ) orelse continue;
+
+                    if (v.mag2(vertex - origin) < coll.radius * coll.radius) {
                         return .{
                             .idx = idx,
-                            .point = pos,
+                            .point = origin,
                         };
                     }
 
                     // Adjust for radius
-                    const point = vertex + v.v(coll.radius) * v.normalize(-vertex);
+                    const point = vertex + v.v(coll.radius) * v.normalize(origin - vertex);
 
-                    const dist2 = v.mag2(point);
+                    const dist2 = v.mag2(point - origin);
                     if (min_d > dist2) {
                         min_d = dist2;
                         min_p = .{
                             .idx = idx,
-                            .point = pos + point,
+                            .point = point,
                         };
                     }
                 }
@@ -180,51 +247,9 @@ pub fn closestStatic(self: World, pos: v.Vec2, max_distance: f64) ?ClosestPoint 
     std.debug.assert(std.math.isFinite(min_d));
     return min_p;
 }
-
-pub const ClosestPoint = struct {
+pub const SearchResult = struct {
     idx: u32,
     point: v.Vec2,
-};
-
-const BoxOutlineIterator = struct {
-    center: [2]i64,
-    radius: u63,
-    index: u64 = 0,
-
-    pub fn next(self: *BoxOutlineIterator) ?[2]i64 {
-        if (self.radius == 0) {
-            if (self.index == 0) {
-                self.index += 1;
-                return self.center;
-            } else {
-                return null;
-            }
-        }
-
-        if (self.index >> 2 > self.radius * 2) {
-            return null;
-        }
-
-        const idx = @intCast(u62, self.index >> 2);
-        const quad = @truncate(u4, self.index);
-        self.index += 1;
-
-        var pos = [2]i64{
-            self.radius,
-            self.radius,
-        };
-
-        pos[quad & 1] -= idx;
-        if (quad & 2 != 0) {
-            pos[0] *= -1;
-            pos[1] *= -1;
-        }
-
-        pos[0] += self.center[0];
-        pos[1] += self.center[1];
-
-        return pos;
-    }
 };
 
 pub fn tick(self: World, resolver: anytype) !void {
