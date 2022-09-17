@@ -157,6 +157,10 @@ pub fn tick(self: World, resolver: anytype) !void {
             var collided = false;
             while (it.next()) |static_id| {
                 const collider = self.static.items[static_id];
+                if (!box.collides(collider.box)) {
+                    continue;
+                }
+
                 const norm = collide(info, .{
                     .pos = .{ 0, 0 },
                     .collider = collider.reify(self.vertices.items),

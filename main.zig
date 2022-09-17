@@ -173,10 +173,13 @@ pub fn main() !void {
         {
             const cursor = try win.getCursorPos();
             const pos = v.Vec2{ cursor.xpos, cursor.ypos };
-            var it = world.static_hash.get(.{ .min = pos, .max = pos + v.v(50) });
+            const cursor_box = v.Box{ .min = pos, .max = pos + v.v(50) };
+            var it = world.static_hash.get(cursor_box);
             var count: usize = 0;
-            while (it.next()) |_| {
-                count += 1;
+            while (it.next()) |id| {
+                if (cursor_box.collides(world.static.items[id].box)) {
+                    count += 1;
+                }
             }
 
             ctx.strokeColor(nanovg.Color.hex(0x00ffff80));

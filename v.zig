@@ -25,6 +25,10 @@ pub const Box = struct {
             .max = self.max + @maximum(vec, v(0)),
         };
     }
+
+    pub fn collides(a: Box, b: Box) bool {
+        return !(@reduce(.Or, a.max < b.min) or @reduce(.Or, b.max < a.min));
+    }
 };
 
 /// Turn a scalar into a vector
