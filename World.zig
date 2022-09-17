@@ -115,8 +115,8 @@ pub const ColliderInfo = struct {
     collider: collision.Collider,
 };
 
-pub fn closestStatic(self: World, pos: v.Vec2, max_distance: f64) ?SearchResult {
-    return self.searchStatic(SearchClosest, pos, max_distance, {});
+pub fn closestStatic(self: World, pos: v.Vec2, max_distance_squared: f64) ?SearchResult {
+    return self.searchStatic(SearchClosest, pos, max_distance_squared, {});
 }
 const SearchClosest = struct {
     pub const Context = void;
@@ -126,10 +126,15 @@ const SearchClosest = struct {
         return collision.closestPoint(origin, coll);
     }
 
-    pub const BinIterator = struct {
+    pub fn binIterator(center: [2]i64, radius: u52, _: void) BinIterator {
+        return .{
+            .center = center,
+            .radius = radius,
+        };
+    }
+    const BinIterator = struct {
         center: [2]i64,
-        radius: u63,
-        context: void,
+        radius: u52,
         index: u64 = 0,
 
         pub fn next(self: *BinIterator) ?[2]i64 {
@@ -169,11 +174,102 @@ const SearchClosest = struct {
     };
 };
 
+/// WARNING: if you pass an infinite max_distance_squared and the ray does not hit any object, this function will crash
+pub fn raycastStatic(self: World, pos: v.Vec2, dir: v.Vec2, max_distance_squared: f64) ?SearchResult {
+    if (@reduce(.And, dir == v.v(0))) {
+        return null;
+    }
+    return self.searchStatic(SearchRay, pos, max_distance_squared, .{
+        .pos = pos,
+        .dir = v.normalize(dir),
+        .world = &self,
+    });
+}
+pub const SearchRay = struct {
+    pub const Context = struct {
+        pos: v.Vec2,
+        dir: v.Vec2,
+        world: *const World,
+    };
+
+    /// Return closest point on collider
+    pub fn findPoint(origin: v.Vec2, coll: collision.Collider, ctx: Context) ?v.Vec2 {
+        var pos = origin;
+        var prev_dist = std.math.inf(f64);
+        while (true) {
+            // Find distance to collider
+            const point = collision.closestPoint(pos, coll);
+            const dist = v.mag(point - pos);
+
+            if (dist < ctx.world.slop * ctx.world.slop) {
+                return point;
+            }
+
+            if (dist >= prev_dist) {
+                // We've gone past the closest point
+                return null;
+            }
+            prev_dist = dist;
+
+            // March ray
+            pos += ctx.dir * v.v(dist);
+        }
+    }
+
+    pub fn binIterator(_: [2]i64, radius: u52, ctx: Context) BinIterator {
+        // Redefine axes so the line has a gradient <= 1
+        const x = @boolToInt(@fabs(ctx.dir[0]) < @fabs(ctx.dir[1]));
+        const y = 1 - x;
+
+        const grad = ctx.dir[y] / ctx.dir[x];
+        const sign = std.math.sign(ctx.dir[x]);
+
+        const offset = sign * @intToFloat(f64, radius);
+        var off = v.v(offset);
+        off[y] *= grad;
+        const pos = @floor(ctx.pos + off);
+
+        var it = BinIterator{
+            .bins = undefined,
+            .i = 2,
+        };
+
+        it.i -= 1;
+        it.bins[it.i] = ctx.world.static_hash.posToBin(pos);
+
+        // Fill in diagonals
+        const prevy = @floor(ctx.pos[y] + grad * (offset - sign));
+        if (prevy != pos[y]) {
+            var pos2 = pos;
+            pos2[x] -= sign;
+
+            it.i -= 1;
+            it.bins[it.i] = ctx.world.static_hash.posToBin(pos2);
+        }
+
+        return it;
+    }
+
+    const BinIterator = struct {
+        bins: [2][2]i64,
+        i: u2,
+
+        pub fn next(self: *BinIterator) ?[2]i64 {
+            if (self.i < self.bins.len) {
+                const bin = self.bins[self.i];
+                self.i += 1;
+                return bin;
+            }
+            return null;
+        }
+    };
+};
+
 pub fn searchStatic(
     self: World,
     comptime strategy: type,
     origin: v.Vec2,
-    max_distance: f64,
+    max_distance_squared: f64,
     context: strategy.Context,
 ) ?SearchResult {
     if (self.static.items.len == 0) {
@@ -185,20 +281,15 @@ pub fn searchStatic(
 
     const origin_bin = self.static_hash.posToBin(origin);
 
-    var min_d: f64 = max_distance * max_distance;
+    var min_d: f64 = max_distance_squared;
     var min_p: ?SearchResult = null;
 
     var found_closer_bin = true;
-    var radius: u63 = 0;
+    var radius: u52 = 0;
     while (found_closer_bin) : (radius += 1) {
         found_closer_bin = false;
 
-        var it = strategy.BinIterator{
-            .center = origin_bin,
-            .radius = radius,
-            .context = context,
-        };
-
+        var it = strategy.binIterator(origin_bin, radius, context);
         while (it.next()) |bin_pos| {
             if (min_d <= self.static_hash.binBox(bin_pos).distanceSquared(origin)) {
                 continue;

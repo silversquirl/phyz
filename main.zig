@@ -23,6 +23,7 @@ pub fn main() !void {
     try glfw.makeContextCurrent(win);
 
     win.setKeyCallback(keyCallback);
+    win.setMouseButtonCallback(buttonCallback);
 
     const ctx = nanovg.Context.createGl3(.{});
     defer ctx.deleteGl3();
@@ -185,12 +186,21 @@ pub fn main() !void {
             }
         }
 
+        const cursor = try win.getCursorPos();
+        const cursor_pos = v.Vec2{ cursor.xpos, cursor.ypos };
         {
-            const cursor = try win.getCursorPos();
-            const pos = v.Vec2{ cursor.xpos, cursor.ypos };
-
-            if (world.closestStatic(pos, std.math.inf(f64))) |closest| {
+            if (world.closestStatic(cursor_pos, std.math.inf(f64))) |closest| {
                 drawPoint(ctx, closest.point, 0x00ffffff);
+            }
+        }
+
+        if (button_start.get(.left)) |start_cursor| {
+            const pos = v.Vec2{ start_cursor.xpos, start_cursor.ypos };
+            const dir = cursor_pos - pos;
+            drawVector(ctx, pos, dir, 0xffffffff);
+
+            if (world.raycastStatic(pos, dir, v.mag2(dir))) |result| {
+                drawPoint(ctx, result.point, 0xff00ffff);
             }
         }
 
@@ -310,5 +320,17 @@ fn keyCallback(win: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Acti
             .repeat => {},
         },
         else => {},
+    }
+}
+
+var button_start = std.enums.EnumArray(glfw.MouseButton, ?glfw.Window.CursorPos).initFill(null);
+fn buttonCallback(win: glfw.Window, button: glfw.MouseButton, action: glfw.Action, mods: glfw.Mods) void {
+    _ = mods;
+    switch (action) {
+        .release => button_start.set(button, null),
+        .press => if (win.getCursorPos()) |pos| {
+            button_start.set(button, pos);
+        } else |_| {},
+        .repeat => undefined,
     }
 }
