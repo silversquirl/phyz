@@ -7,6 +7,26 @@ comptime {
 
 pub const Vec2 = @Vector(2, f64);
 
+pub const Box = struct {
+    min: Vec2,
+    max: Vec2,
+
+    pub fn add(self: Box, vec: Vec2) Box {
+        return .{
+            .min = self.min + vec,
+            .max = self.max + vec,
+        };
+    }
+
+    pub fn expand(self: Box, vec: Vec2) Box {
+        // Expand in direction of vector
+        return .{
+            .min = self.min + @minimum(vec, v(0)),
+            .max = self.max + @maximum(vec, v(0)),
+        };
+    }
+};
+
 /// Turn a scalar into a vector
 pub inline fn v(s: f64) Vec2 {
     return @splat(2, s);

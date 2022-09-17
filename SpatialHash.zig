@@ -9,7 +9,7 @@ bin_size: f64 = 100.0,
 map: std.ArrayHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32), Context, false) = .{},
 
 // OPTIM: rasterizing polygons may be faster than using a bounding box, as it results in less false positives during querying
-pub fn add(self: *SpatialHash, allocator: std.mem.Allocator, box: Box, value: u32) !void {
+pub fn add(self: *SpatialHash, allocator: std.mem.Allocator, box: v.Box, value: u32) !void {
     std.debug.assert(@reduce(.And, box.min < box.max));
 
     var resize = false;
@@ -34,7 +34,7 @@ pub fn add(self: *SpatialHash, allocator: std.mem.Allocator, box: Box, value: u3
     }
 }
 
-pub fn remove(self: *SpatialHash, box: Box, value: u32) void {
+pub fn remove(self: *SpatialHash, box: v.Box, value: u32) void {
     var it = BoxIterator.init(self.bin_size, box);
     while (it.next()) |hash| {
         if (self.map.get(hash)) |bin| {
@@ -47,7 +47,7 @@ pub fn remove(self: *SpatialHash, box: Box, value: u32) void {
 
 /// May return duplicates
 /// add and remove invalidate this iterator
-pub fn get(self: *const SpatialHash, box: Box) Iterator {
+pub fn get(self: *const SpatialHash, box: v.Box) Iterator {
     return .{
         .hash = self,
         .box = BoxIterator.init(self.bin_size, box),
@@ -84,24 +84,12 @@ pub fn deinit(self: *SpatialHash, allocator: std.mem.Allocator) void {
     self.map.deinit(allocator);
 }
 
-pub const Box = struct {
-    min: v.Vec2,
-    max: v.Vec2,
-
-    pub fn add(self: Box, vec: v.Vec2) Box {
-        return .{
-            .min = self.min + vec,
-            .max = self.max + vec,
-        };
-    }
-};
-
 const BoxIterator = struct {
     minx: i64,
     max: [2]i64,
     pos: [2]i64,
 
-    pub fn init(bin_size: f64, box: Box) BoxIterator {
+    pub fn init(bin_size: f64, box: v.Box) BoxIterator {
         const qmin = @floor(box.min / v.v(bin_size));
         const qmax = @ceil(box.max / v.v(bin_size));
 

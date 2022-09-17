@@ -115,7 +115,7 @@ pub fn main() !void {
                     .active => colors[i],
                 });
 
-                const box = World.colliderBox(c.collider, v.v(0)).add(c.pos);
+                const box = c.collider.box().add(c.pos);
                 ctx.beginPath();
                 ctx.rect(
                     @floatCast(f32, box.min[0]),

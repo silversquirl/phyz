@@ -54,32 +54,10 @@ pub fn addStatic(self: *World, collider: Collider) !u32 {
     try self.static.append(self.allocator, coll);
     errdefer _ = self.static.pop();
 
-    const box = colliderBox(collider, v.v(0));
-    try self.static_hash.add(self.allocator, box, id);
+    try self.static_hash.add(self.allocator, coll.box, id);
     errdefer @compileError("TODO");
 
     return id;
-}
-
-pub fn colliderBox(coll: Collider, expand: v.Vec2) SpatialHash.Box {
-    var min = v.v(std.math.inf(f64));
-    var max = -min;
-    for (coll.verts) |vert| {
-        min = @minimum(min, vert);
-        max = @maximum(max, vert);
-    }
-
-    // Expand by radius in every direction
-    min -= v.v(coll.radius);
-    max += v.v(coll.radius);
-
-    // Expand in direction of expand vector
-    min += @minimum(expand, v.v(0));
-    max += @maximum(expand, v.v(0));
-
-    std.debug.assert(@reduce(.And, min < max));
-
-    return .{ .min = min, .max = max };
 }
 
 fn addCollider(self: *World, coll: Collider) !Collider.Packed {
@@ -90,6 +68,7 @@ fn addCollider(self: *World, coll: Collider) !Collider.Packed {
         .radius = coll.radius,
         .vert_start = @intCast(u32, vert_start),
         .num_verts = @intCast(u32, coll.verts.len),
+        .box = coll.box(),
     };
 }
 
@@ -159,15 +138,15 @@ pub fn tick(self: World, resolver: anytype) !void {
         //// Compute collisions and movement
         // OPTIM: only iterate objects that haven't converged
         for (active.items(.pos)) |pos, i| {
-            const coll = active.items(.collider)[i].reify(self.vertices.items);
+            const coll = active.items(.collider)[i];
             const info = CollisionInfo{
                 .pos = pos,
-                .collider = coll,
+                .collider = coll.reify(self.vertices.items),
             };
 
             const vel = active.items(.vel)[i];
             const move = v.v(movement[i]) * vel;
-            const box = colliderBox(coll, move).add(pos);
+            const box = coll.box.add(pos).expand(move);
 
             var min_fac: f64 = 1;
 
@@ -286,6 +265,23 @@ pub const Collider = struct {
     radius: f64 = 0.01,
     verts: []const v.Vec2 = &.{},
 
+    pub fn box(self: Collider) v.Box {
+        var min = v.v(std.math.inf(f64));
+        var max = -min;
+        for (self.verts) |vert| {
+            min = @minimum(min, vert);
+            max = @maximum(max, vert);
+        }
+
+        // Expand by radius in every direction
+        min -= v.v(self.radius);
+        max += v.v(self.radius);
+
+        std.debug.assert(@reduce(.And, min < max));
+
+        return .{ .min = min, .max = max };
+    }
+
     /// Returns the furthest vertex in direction d.
     /// Does not account for radius.
     fn support(self: Collider, d: v.Vec2) v.Vec2 {
@@ -343,6 +339,7 @@ pub const Collider = struct {
         radius: f64,
         vert_start: u32,
         num_verts: u32,
+        box: v.Box,
 
         pub fn reify(self: Packed, verts: []const v.Vec2) Collider {
             return .{
