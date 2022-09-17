@@ -10,7 +10,7 @@ Goals are simplicity, speed and ease of use, in that order.
 	- [x] Dynamic-Static
 	- [ ] Dynamic-Dynamic
 - [x] Fully customizable collision resolution
-- [ ] Broad phase
+- [x] Broad phase
 - [ ] Queries
 	- [ ] Nearest object
 	- [ ] Raycast
