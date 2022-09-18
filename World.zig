@@ -79,6 +79,14 @@ fn addCollider(self: *World, coll: collision.Collider) !PackedCollider {
     };
 }
 
+pub fn getObjectCollider(self: World, id: u32) collision.OffsetCollider {
+    const active = self.active.slice();
+    return .{
+        .pos = active.items(.pos)[id],
+        .collider = active.items(.collider)[id].reify(self.vertices.items),
+    };
+}
+
 pub fn colliders(self: World) ColliderIterator {
     return .{
         .active = self.active.slice(),
@@ -292,8 +300,8 @@ pub fn search(
     context: strategy.Context,
 ) ?SearchResult {
     const hash = switch (collider_type) {
-        .active => self.active_hash,
-        .static => self.static_hash,
+        .active => &self.active_hash,
+        .static => &self.static_hash,
     };
     const active = switch (collider_type) {
         .active => self.active.slice(),
@@ -333,7 +341,7 @@ pub fn search(
                 for (bin) |idx| {
                     const pos = switch (collider_type) {
                         .active => active.items(.pos)[idx],
-                        .static => .{ 0, 0 },
+                        .static => v.v(0),
                     };
 
                     if (min_d <= coll[idx].box.add(pos).distanceSquared(origin)) {
@@ -375,6 +383,84 @@ pub const SearchResult = struct {
     point: v.Vec2,
 };
 
+pub fn query(
+    self: *const World,
+    allocator: std.mem.Allocator,
+    comptime collider_type: ColliderType,
+    shape: collision.OffsetCollider,
+) !std.MultiArrayList(QueryResult) {
+    const hash = switch (collider_type) {
+        .active => &self.active_hash,
+        .static => &self.static_hash,
+    };
+    const active = switch (collider_type) {
+        .active => self.active.slice(),
+        .static => {},
+    };
+    const collider_list = switch (collider_type) {
+        .active => active.items(.collider),
+        .static => self.static.items,
+    };
+
+    const box = shape.collider.box().add(shape.pos);
+
+    var adapter = QueryResult.Adapter{};
+    errdefer adapter.results.deinit(allocator);
+
+    var result_set = std.AutoArrayHashMap(void, void).init(allocator);
+    defer result_set.deinit();
+
+    var it = hash.get(box);
+    while (it.next()) |id| {
+        const collider = collider_list[id];
+        const pos = switch (collider_type) {
+            .active => active.items(.pos)[id],
+            .static => v.v(0),
+        };
+
+        if (!box.collides(collider.box.add(pos))) {
+            continue;
+        }
+
+        const normal = gjk.minimumPoint(collision.MinkowskiDifference{
+            .a = shape,
+            .b = .{
+                .pos = pos,
+                .collider = collider.reify(self.vertices.items),
+            },
+        });
+
+        const r = shape.collider.radius + collider.radius;
+        if (v.mag2(normal) < r * r) {
+            const gop = try result_set.getOrPutAdapted(id, &adapter);
+            if (!gop.found_existing) {
+                try adapter.results.append(allocator, .{
+                    .id = id,
+                    .normal = normal,
+                });
+            }
+        }
+    }
+
+    return adapter.results;
+}
+pub const QueryResult = struct {
+    id: u32,
+    normal: v.Vec2,
+
+    const Adapter = struct {
+        results: std.MultiArrayList(QueryResult) = .{},
+
+        pub fn eql(self: *Adapter, a: u32, _: void, b_idx: usize) bool {
+            const b = self.results.items(.id)[b_idx];
+            return a == b;
+        }
+        pub fn hash(_: Adapter, k: u32) u32 {
+            return @truncate(u32, std.hash.Wyhash.hash(0, std.mem.asBytes(&k)));
+        }
+    };
+};
+
 pub fn tick(self: *World, resolver: anytype) !void {
     const active = self.active.slice();
 
@@ -414,6 +500,7 @@ pub fn tick(self: *World, resolver: anytype) !void {
             // TODO: Collide with active objects
 
             // Collide with static colliders
+            // TODO: refactor to use self.query
             var it = self.static_hash.get(box);
             var collided = false;
             while (it.next()) |static_id| {
@@ -506,17 +593,6 @@ pub const Object = struct {
     pos: v.Vec2,
     vel: v.Vec2 = v.v(0),
     collider: PackedCollider,
-
-    pub const PhysicalProperties = struct {
-        mass: f64 = 1.0,
-        friction: f64 = 0.0,
-        bounce: f64 = 0.0,
-    };
-
-    pub const MovementTick = struct {
-        step: v.Vec2,
-        total: v.Vec2,
-    };
 };
 pub const ObjectList = std.MultiArrayList(Object).Slice;
 

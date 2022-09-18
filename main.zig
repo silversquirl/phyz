@@ -96,7 +96,7 @@ pub fn main() !void {
         .{ 70, 90 },
     } });
 
-    _ = try world.addObject(.{ 730, 30 }, .{ .radius = 30, .verts = &[_]v.Vec2{.{ 0, 0 }} });
+    const circle = try world.addObject(.{ 730, 30 }, .{ .radius = 30, .verts = &[_]v.Vec2{.{ 0, 0 }} });
 
     const font = ctx.createFontMem("Aileron", @embedFile("deps/nanovg/examples/Aileron-Regular.otf"), false);
 
@@ -159,6 +159,13 @@ pub fn main() !void {
 
         drawHash(ctx, size, world.static_hash, 0xffffff20);
         drawHash(ctx, size, world.active_hash, 0x00ff0020);
+
+        const circ = world.getObjectCollider(circle);
+        {
+            var results = try world.query(allocator, .active, circ);
+            defer results.deinit(allocator);
+            try drawText(ctx, circ.pos, 20, 0xffffffff, "{}", .{results.len - 1});
+        }
 
         const cursor = try win.getCursorPos();
         const cursor_pos = v.Vec2{ cursor.xpos, cursor.ypos };
@@ -286,6 +293,24 @@ fn drawVector(ctx: *nanovg.Context, start: v.Vec2, dir: v.Vec2, color: u32) void
     );
     ctx.strokeColor(nanovg.Color.hex(color));
     ctx.stroke();
+}
+
+fn drawText(
+    ctx: *nanovg.Context,
+    pos: v.Vec2,
+    size: f32,
+    color: u32,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    var buf: [128]u8 = undefined;
+    ctx.fontSize(size);
+    ctx.fillColor(nanovg.Color.hex(color));
+    _ = ctx.text(
+        @floatCast(f32, pos[0]),
+        @floatCast(f32, pos[1]),
+        try std.fmt.bufPrint(&buf, fmt, args),
+    );
 }
 
 fn drawHash(ctx: *nanovg.Context, window_size: glfw.Window.Size, hash: SpatialHash, color: u32) void {

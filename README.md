@@ -11,10 +11,10 @@ Goals are simplicity, speed and ease of use, in that order.
 	- [ ] Dynamic-Dynamic
 - [x] Fully customizable collision resolution
 - [x] Broad phase
-- [x] Static object queries
+- [x] Queries
 	- [x] Nearest object
 	- [x] Raycast
-- [x] Dynamic object queries
+	- [x] Objects in shape
 - [ ] Handle intersecting colliders
 - [ ] Collision masking
 - [ ] More interesting actuators
