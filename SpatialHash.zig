@@ -37,12 +37,18 @@ pub fn add(self: *SpatialHash, allocator: std.mem.Allocator, box: v.Box, value: 
 pub fn remove(self: *SpatialHash, box: v.Box, value: u32) void {
     var it = BoxIterator.init(self.bin_size, box);
     while (it.next()) |hash| {
-        if (self.map.get(hash)) |bin| {
+        if (self.map.getPtr(hash)) |bin| {
             if (std.mem.indexOfScalar(u32, bin.items, value)) |idx| {
-                bin.swapRemove(idx);
+                std.debug.assert(bin.swapRemove(idx) == value);
             }
         }
     }
+}
+
+pub fn move(self: *SpatialHash, allocator: std.mem.Allocator, old: v.Box, new: v.Box, value: u32) !void {
+    // OPTIM: edit only cells that have not changed
+    self.remove(old, value);
+    try self.add(allocator, new, value);
 }
 
 /// May return duplicates

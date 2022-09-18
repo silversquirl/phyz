@@ -3,7 +3,7 @@ const v = @import("v.zig");
 const World = @import("World.zig");
 
 pub const slide = struct {
-    pub fn resolve(_: World, active: World.ObjectList, collisions: []const World.CollisionResult) void {
+    pub fn resolve(active: World.ObjectList, collisions: []const World.CollisionResult) void {
         for (collisions) |coll| {
             const vel = &active.items(.vel)[coll.obj];
             // Project velocity onto collided face
@@ -21,7 +21,7 @@ pub fn bounce(elastic: f64) Bounce {
 pub const Bounce = struct {
     elastic: f64,
 
-    pub fn resolve(self: Bounce, _: World, active: World.ObjectList, collisions: []const World.CollisionResult) void {
+    pub fn resolve(self: Bounce, active: World.ObjectList, collisions: []const World.CollisionResult) void {
         for (collisions) |coll| {
             const vel = &active.items(.vel)[coll.obj];
             // Mirror projected velocity around normal

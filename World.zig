@@ -19,6 +19,7 @@ active: std.MultiArrayList(Object) = .{},
 static: std.ArrayListUnmanaged(PackedCollider) = .{},
 vertices: std.ArrayListUnmanaged(v.Vec2) = .{},
 
+active_hash: SpatialHash = .{},
 static_hash: SpatialHash = .{},
 
 /// Free all memory associated with the world
@@ -27,6 +28,7 @@ pub fn deinit(self: *World) void {
     self.static.deinit(self.allocator);
     self.vertices.deinit(self.allocator);
 
+    self.active_hash.deinit(self.allocator);
     self.static_hash.deinit(self.allocator);
 }
 
@@ -38,13 +40,17 @@ pub fn addObject(
     const coll = try self.addCollider(collider);
     errdefer self.vertices.items.len -= collider.verts.len;
 
+    const id = @intCast(u32, self.active.len);
     try self.active.append(self.allocator, .{
         .pos = pos,
         .collider = coll,
     });
+    errdefer _ = self.active.pop();
+
+    try self.active_hash.add(self.allocator, coll.box.add(pos), id);
     errdefer @compileError("TODO");
 
-    return @intCast(u32, self.active.len) - 1;
+    return id;
 }
 
 pub fn addStatic(self: *World, collider: collision.Collider) !u32 {
@@ -110,20 +116,26 @@ pub const ColliderIterator = struct {
     }
 };
 pub const ColliderInfo = struct {
-    kind: enum { active, static },
+    kind: ColliderType,
     pos: v.Vec2,
     collider: collision.Collider,
 };
+pub const ColliderType = enum { active, static };
 
-pub fn closestStatic(self: World, pos: v.Vec2, max_distance_squared: f64) ?SearchResult {
-    return self.searchStatic(SearchClosest, pos, max_distance_squared, {});
+pub fn closest(
+    self: World,
+    comptime collider_type: ColliderType,
+    pos: v.Vec2,
+    max_distance_squared: f64,
+) ?SearchResult {
+    return self.search(collider_type, SearchClosest, pos, max_distance_squared, {});
 }
 const SearchClosest = struct {
     pub const Context = void;
 
     /// Return closest point on collider
-    pub fn findPoint(origin: v.Vec2, coll: collision.Collider, _: void) ?v.Vec2 {
-        return collision.closestPoint(origin, coll);
+    pub fn findPoint(origin: v.Vec2, offset: v.Vec2, coll: collision.Collider, _: void) ?v.Vec2 {
+        return collision.closestPoint(origin, offset, coll);
     }
 
     pub fn binIterator(center: [2]i64, radius: u52, _: void) BinIterator {
@@ -175,11 +187,17 @@ const SearchClosest = struct {
 };
 
 /// WARNING: if you pass an infinite max_distance_squared and the ray does not hit any object, this function will crash
-pub fn raycastStatic(self: World, pos: v.Vec2, dir: v.Vec2, max_distance_squared: f64) ?SearchResult {
+pub fn raycast(
+    self: World,
+    comptime collider_type: ColliderType,
+    pos: v.Vec2,
+    dir: v.Vec2,
+    max_distance_squared: f64,
+) ?SearchResult {
     if (@reduce(.And, dir == v.v(0))) {
         return null;
     }
-    return self.searchStatic(SearchRay, pos, max_distance_squared, .{
+    return self.search(collider_type, SearchRay, pos, max_distance_squared, .{
         .pos = pos,
         .dir = v.normalize(dir),
         .world = &self,
@@ -193,12 +211,12 @@ pub const SearchRay = struct {
     };
 
     /// Return closest point on collider
-    pub fn findPoint(origin: v.Vec2, coll: collision.Collider, ctx: Context) ?v.Vec2 {
+    pub fn findPoint(origin: v.Vec2, offset: v.Vec2, coll: collision.Collider, ctx: Context) ?v.Vec2 {
         var pos = origin;
         var prev_dist = std.math.inf(f64);
         while (true) {
             // Find distance to collider
-            const point = collision.closestPoint(pos, coll);
+            const point = collision.closestPoint(pos, offset, coll);
             const dist = v.mag(point - pos);
 
             if (dist < ctx.world.slop * ctx.world.slop) {
@@ -265,21 +283,35 @@ pub const SearchRay = struct {
     };
 };
 
-pub fn searchStatic(
+pub fn search(
     self: World,
+    comptime collider_type: ColliderType,
     comptime strategy: type,
     origin: v.Vec2,
     max_distance_squared: f64,
     context: strategy.Context,
 ) ?SearchResult {
-    if (self.static.items.len == 0) {
+    const hash = switch (collider_type) {
+        .active => self.active_hash,
+        .static => self.static_hash,
+    };
+    const active = switch (collider_type) {
+        .active => self.active.slice(),
+        .static => {},
+    };
+    const coll = switch (collider_type) {
+        .active => active.items(.collider),
+        .static => self.static.items,
+    };
+
+    if (coll.len == 0) {
         return null;
     }
 
-    // OPTIM: iterate all statics if there are only a few
+    // OPTIM: iterate all colliders if there are only a few
     //        This may be significantly faster in some situations because the full alg is O(n) on distance
 
-    const origin_bin = self.static_hash.posToBin(origin);
+    const origin_bin = hash.posToBin(origin);
 
     var min_d: f64 = max_distance_squared;
     var min_p: ?SearchResult = null;
@@ -291,22 +323,27 @@ pub fn searchStatic(
 
         var it = strategy.binIterator(origin_bin, radius, context);
         while (it.next()) |bin_pos| {
-            if (min_d <= self.static_hash.binBox(bin_pos).distanceSquared(origin)) {
+            if (min_d <= hash.binBox(bin_pos).distanceSquared(origin)) {
                 continue;
             } else {
                 found_closer_bin = true;
             }
 
-            if (self.static_hash.getBin(bin_pos)) |bin| {
+            if (hash.getBin(bin_pos)) |bin| {
                 for (bin) |idx| {
-                    const coll = self.static.items[idx];
-                    if (min_d <= coll.box.distanceSquared(origin)) {
+                    const pos = switch (collider_type) {
+                        .active => active.items(.pos)[idx],
+                        .static => .{ 0, 0 },
+                    };
+
+                    if (min_d <= coll[idx].box.add(pos).distanceSquared(origin)) {
                         continue;
                     }
 
                     const point = strategy.findPoint(
                         origin,
-                        coll.reify(self.vertices.items),
+                        pos,
+                        coll[idx].reify(self.vertices.items),
                         context,
                     ) orelse continue;
 
@@ -338,7 +375,7 @@ pub const SearchResult = struct {
     point: v.Vec2,
 };
 
-pub fn tick(self: World, resolver: anytype) !void {
+pub fn tick(self: *World, resolver: anytype) !void {
     const active = self.active.slice();
 
     // Init movement amounts for each object
@@ -422,8 +459,18 @@ pub fn tick(self: World, resolver: anytype) !void {
                 // Advance movement
                 const move_fac = 0.9999 * min_fac;
                 const move_vec = move * v.v(move_fac);
-                active.items(.pos)[i] += move_vec;
+                const new_pos = pos + move_vec;
+
                 movement[i] *= 1 - move_fac;
+                active.items(.pos)[i] = new_pos;
+
+                // Move in spatial hash
+                try self.active_hash.move(
+                    self.allocator,
+                    coll.box.add(pos),
+                    coll.box.add(new_pos),
+                    @intCast(u32, i),
+                );
 
                 if (movement[i] * v.mag2(vel) > self.slop * self.slop) {
                     // More movement to do
@@ -435,7 +482,7 @@ pub fn tick(self: World, resolver: anytype) !void {
         //// Resolve collisions
         if (collisions.count() > 0) {
             std.debug.assert(!done);
-            resolver.resolve(self, active, @as([]const CollisionResult, collisions.keys()));
+            resolver.resolve(active, @as([]const CollisionResult, collisions.keys()));
             collisions.clearRetainingCapacity();
         }
     }

@@ -14,7 +14,7 @@ Goals are simplicity, speed and ease of use, in that order.
 - [x] Static object queries
 	- [x] Nearest object
 	- [x] Raycast
-- [ ] Dynamic object queries
+- [x] Dynamic object queries
 - [ ] Handle intersecting colliders
 - [ ] Collision masking
 - [ ] More interesting actuators

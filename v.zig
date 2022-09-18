@@ -11,6 +11,10 @@ pub const Box = struct {
     min: Vec2,
     max: Vec2,
 
+    pub fn eq(a: Box, b: Box) bool {
+        return @reduce(.And, a.min == b.min) and @reduce(.And, a.max == b.max);
+    }
+
     /// Return a new box, moved in the direction of vec
     pub fn add(self: Box, vec: Vec2) Box {
         return .{

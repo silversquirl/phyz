@@ -8,6 +8,8 @@ const resolver = @import("resolver.zig");
 
 const collision = @import("collision.zig");
 const v = @import("v.zig");
+
+const SpatialHash = @import("SpatialHash.zig");
 const World = @import("World.zig");
 
 pub fn main() !void {
@@ -88,6 +90,11 @@ pub fn main() !void {
         .{ 50, 0 },
         .{ 100, 90 },
     } });
+    _ = try world.addObject(.{ 600, 100 }, .{ .radius = 50, .verts = &[_]v.Vec2{
+        .{ 0, 90 },
+        .{ 50, 0 },
+        .{ 70, 90 },
+    } });
 
     _ = try world.addObject(.{ 730, 30 }, .{ .radius = 30, .verts = &[_]v.Vec2{.{ 0, 0 }} });
 
@@ -150,47 +157,17 @@ pub fn main() !void {
             }
         }
 
-        {
-            ctx.strokeColor(nanovg.Color.hex(0xffffff20));
-            ctx.fillColor(nanovg.Color.hex(0xffffff10));
-
-            const bin_size = @floatCast(f32, world.static_hash.bin_size);
-            const w = (size.width - 1) / @floatToInt(u32, bin_size) + 1;
-            const h = (size.height - 1) / @floatToInt(u32, bin_size) + 1;
-
-            var y: u32 = 0;
-            while (y < h) : (y += 1) {
-                var x: u32 = 0;
-                while (x < w) : (x += 1) {
-                    ctx.beginPath();
-                    ctx.rect(
-                        @intToFloat(f32, x) * bin_size,
-                        @intToFloat(f32, y) * bin_size,
-                        bin_size,
-                        bin_size,
-                    );
-                    ctx.stroke();
-
-                    const pos = v.Vec2{
-                        @intToFloat(f64, x) * bin_size,
-                        @intToFloat(f64, y) * bin_size,
-                    };
-                    var it = world.static_hash.get(.{
-                        .min = pos,
-                        .max = pos + v.v(world.static_hash.bin_size),
-                    });
-                    if (it.next() != null) {
-                        ctx.fill();
-                    }
-                }
-            }
-        }
+        drawHash(ctx, size, world.static_hash, 0xffffff20);
+        drawHash(ctx, size, world.active_hash, 0x00ff0020);
 
         const cursor = try win.getCursorPos();
         const cursor_pos = v.Vec2{ cursor.xpos, cursor.ypos };
         {
-            if (world.closestStatic(cursor_pos, std.math.inf(f64))) |closest| {
+            if (world.closest(.static, cursor_pos, std.math.inf(f64))) |closest| {
                 drawPoint(ctx, closest.point, 0x00ffffff);
+            }
+            if (world.closest(.active, cursor_pos, std.math.inf(f64))) |closest| {
+                drawPoint(ctx, closest.point, 0x0000ffff);
             }
         }
 
@@ -199,8 +176,11 @@ pub fn main() !void {
             const dir = cursor_pos - pos;
             drawVector(ctx, pos, dir, 0xffffffff);
 
-            if (world.raycastStatic(pos, dir, v.mag2(dir))) |result| {
+            if (world.raycast(.static, pos, dir, v.mag2(dir))) |result| {
                 drawPoint(ctx, result.point, 0xff00ffff);
+            }
+            if (world.raycast(.active, pos, dir, v.mag2(dir))) |result| {
+                drawPoint(ctx, result.point, 0xffff00ff);
             }
         }
 
@@ -308,6 +288,43 @@ fn drawVector(ctx: *nanovg.Context, start: v.Vec2, dir: v.Vec2, color: u32) void
     ctx.stroke();
 }
 
+fn drawHash(ctx: *nanovg.Context, window_size: glfw.Window.Size, hash: SpatialHash, color: u32) void {
+    var clr = nanovg.Color.hex(color);
+    ctx.strokeColor(clr);
+    clr.a *= 0.5;
+    ctx.fillColor(clr);
+
+    const bin_size = @floatCast(f32, hash.bin_size);
+    const w = (window_size.width - 1) / @floatToInt(u32, bin_size) + 1;
+    const h = (window_size.height - 1) / @floatToInt(u32, bin_size) + 1;
+
+    var y: u32 = 0;
+    while (y < h) : (y += 1) {
+        var x: u32 = 0;
+        while (x < w) : (x += 1) {
+            ctx.beginPath();
+            ctx.rect(
+                @intToFloat(f32, x) * bin_size,
+                @intToFloat(f32, y) * bin_size,
+                bin_size,
+                bin_size,
+            );
+            ctx.stroke();
+
+            const pos = v.Vec2{
+                @intToFloat(f64, x) * bin_size,
+                @intToFloat(f64, y) * bin_size,
+            };
+            var it = hash.get(.{
+                .min = pos,
+                .max = pos + v.v(hash.bin_size),
+            });
+            if (it.next() != null) {
+                ctx.fill();
+            }
+        }
+    }
+}
 fn keyCallback(win: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
     _ = win;
     _ = scancode;

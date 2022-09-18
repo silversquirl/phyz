@@ -2,9 +2,9 @@ const std = @import("std");
 const gjk = @import("gjk.zig");
 const v = @import("v.zig");
 
-pub fn closestPoint(origin: v.Vec2, coll: Collider) v.Vec2 {
+pub fn closestPoint(origin: v.Vec2, offset: v.Vec2, coll: Collider) v.Vec2 {
     const vertex = gjk.minimumPoint(OffsetCollider{
-        .pos = -origin,
+        .pos = offset - origin,
         .collider = coll,
     });
     if (v.mag2(vertex) < coll.radius * coll.radius) {
