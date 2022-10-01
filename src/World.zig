@@ -1,9 +1,8 @@
 const std = @import("std");
-
-const collision = @import("collision.zig");
-const gjk = @import("gjk.zig");
-const v = @import("v.zig");
-const SpatialHash = @import("SpatialHash.zig");
+const phyz = @import("phyz.zig");
+pub const SpatialHash = @import("world/SpatialHash.zig");
+const collision = phyz.collision;
+const v = phyz.v;
 
 const World = @This();
 
@@ -422,7 +421,7 @@ pub fn query(
             continue;
         }
 
-        const normal = gjk.minimumPoint(collision.MinkowskiDifference{
+        const normal = collision.gjk.minimumPoint(collision.MinkowskiDifference{
             .a = shape,
             .b = .{
                 .pos = pos,
@@ -509,7 +508,7 @@ pub fn tick(self: *World, resolver: anytype) !void {
                     continue;
                 }
 
-                const norm = gjk.minimumPoint(collision.MinkowskiDifference{
+                const norm = collision.gjk.minimumPoint(collision.MinkowskiDifference{
                     .a = info,
                     .b = .{
                         .pos = .{ 0, 0 },

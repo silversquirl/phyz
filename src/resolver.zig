@@ -1,6 +1,7 @@
 const std = @import("std");
-const v = @import("v.zig");
-const World = @import("World.zig");
+const phyz = @import("phyz.zig");
+const v = phyz.v;
+const World = phyz.World;
 
 pub const slide = struct {
     pub fn resolve(active: World.ObjectList, collisions: []const World.CollisionResult) void {

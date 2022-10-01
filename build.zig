@@ -8,7 +8,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe = b.addExecutable("main", "main.zig");
 
-    exe.addIncludeDir("deps/nanovg/examples/include");
+    exe.addIncludePath("deps/nanovg/examples/include");
     nvg.add(b, exe);
 
     glfw.link(b, exe, .{});
@@ -17,6 +17,8 @@ pub fn build(b: *std.build.Builder) void {
     exe.addPackagePath("zgl", "deps/zgl/zgl.zig");
     exe.linkLibC();
     exe.linkSystemLibrary("epoxy");
+
+    exe.addPackagePath("phyz", "src/phyz.zig");
 
     exe.setTarget(target);
     exe.setBuildMode(mode);

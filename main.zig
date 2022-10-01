@@ -2,15 +2,8 @@ const std = @import("std");
 const gl = @import("zgl");
 const glfw = @import("glfw");
 const nanovg = @import("nanovg");
-
-const actuator = @import("actuator.zig");
-const resolver = @import("resolver.zig");
-
-const collision = @import("collision.zig");
-const v = @import("v.zig");
-
-const SpatialHash = @import("SpatialHash.zig");
-const World = @import("World.zig");
+const phyz = @import("phyz");
+const v = phyz.v;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -33,12 +26,12 @@ pub fn main() !void {
     gl.clearColor(0, 0, 0, 1);
 
     const rate = 1.0 / 1.0;
-    var world = World{ .allocator = allocator, .tick_time = rate / 60.0 };
+    var world = phyz.World{ .allocator = allocator, .tick_time = rate / 60.0 };
     defer world.deinit();
 
-    var physics = actuator.composite(.{
-        actuator.drag(0.55),
-        actuator.gravity(.{ 0, 1000 }),
+    var physics = phyz.actuator.composite(.{
+        phyz.actuator.drag(0.55),
+        phyz.actuator.gravity(.{ 0, 1000 }),
     });
 
     _ = try world.addStatic(.{ .verts = &[_]v.Vec2{
@@ -192,7 +185,7 @@ pub fn main() !void {
         }
 
         physics.apply(world);
-        try world.tick(resolver.bounce(0.9));
+        try world.tick(phyz.resolver.bounce(0.9));
 
         ctx.endFrame();
 
@@ -201,7 +194,7 @@ pub fn main() !void {
     }
 }
 
-fn drawCollider(ctx: *nanovg.Context, pos: v.Vec2, c: collision.Collider, color: u32) void {
+fn drawCollider(ctx: *nanovg.Context, pos: v.Vec2, c: phyz.collision.Collider, color: u32) void {
     var clr = nanovg.Color.hex(color);
     ctx.strokeColor(clr);
     clr.a *= 0.5;
@@ -313,7 +306,7 @@ fn drawText(
     );
 }
 
-fn drawHash(ctx: *nanovg.Context, window_size: glfw.Window.Size, hash: SpatialHash, color: u32) void {
+fn drawHash(ctx: *nanovg.Context, window_size: glfw.Window.Size, hash: phyz.World.SpatialHash, color: u32) void {
     var clr = nanovg.Color.hex(color);
     ctx.strokeColor(clr);
     clr.a *= 0.5;

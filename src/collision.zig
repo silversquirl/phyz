@@ -1,6 +1,7 @@
 const std = @import("std");
-const gjk = @import("gjk.zig");
-const v = @import("v.zig");
+const phyz = @import("phyz.zig");
+pub const gjk = @import("collision/gjk.zig");
+const v = phyz.v;
 
 pub fn closestPoint(origin: v.Vec2, offset: v.Vec2, coll: Collider) v.Vec2 {
     const vertex = gjk.minimumPoint(OffsetCollider{

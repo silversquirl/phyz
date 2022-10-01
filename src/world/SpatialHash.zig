@@ -1,5 +1,6 @@
 const std = @import("std");
-const v = @import("v.zig");
+const phyz = @import("../phyz.zig");
+const v = phyz.v;
 
 const SpatialHash = @This();
 
