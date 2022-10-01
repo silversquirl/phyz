@@ -17,6 +17,8 @@ Goals are simplicity, speed and ease of use, in that order.
 	- [x] Objects in shape
 - [ ] Handle intersecting colliders
 - [ ] Collision masking
+- [ ] Temporary collider disable flag
+- [ ] Collider deletion
 - [ ] More interesting actuators
 	- [ ] Forcefields/magnetism
 	- [ ] Constraints
